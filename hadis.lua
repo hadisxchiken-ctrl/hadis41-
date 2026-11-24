@@ -1,7 +1,5 @@
 --[[────────────────────────────────────────────────────────────
-    HADIS // M7 ANTI VC BAN + SELF MUTE
-    Single method: republish (mute->unmute, session stays, audio keeps working)
-    warning -> auto-mute · suspension -> auto rejoin
+    HADIS // M7 ANTI VC BAN + SELF MUTE  (adaptive mute probe)
     run: loadstring(game:HttpGet("https://raw.githubusercontent.com/hadisxchiken-ctrl/hadis41-/main/hadis.lua"))()
 ────────────────────────────────────────────────────────────]]
 
@@ -171,6 +169,12 @@ local function vcOff()
     return ok and place == false
 end
 
+local function apiState()
+    local ok, v = pcall(function() return VCS.UseAudioApi end)
+    if ok and typeof(v) == "EnumItem" then return v.Name end
+    return "?"
+end
+
 -- ═══ MODAL SCAN ═══
 local lastDismiss, lastWarn = 0, 0
 
@@ -288,7 +292,7 @@ outline(refreshBtn, C.border, 1)
 table.insert(body, section("DIAGNOSTICS", 4))
 
 local diagCard = mk("Frame", panel, {
-    Size = UDim2.new(1, 0, 0, 64), BackgroundColor3 = C.card, BorderSizePixel = 0, LayoutOrder = 5,
+    Size = UDim2.new(1, 0, 0, 88), BackgroundColor3 = C.card, BorderSizePixel = 0, LayoutOrder = 5,
 })
 round(diagCard, 8)
 outline(diagCard, C.border, 1)
@@ -312,6 +316,8 @@ local diagChannel = diagRow("channel", 18)
 local diagMic     = diagRow("mic", 30)
 local diagIntern  = diagRow("internals", 42)
 local diagInput   = diagRow("audioinput", 54)
+local diagApi     = diagRow("audioapi", 66)
+local diagPath    = diagRow("mute path", 78)
 
 local startBtn = mk("TextButton", panel, {
     Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = C.greenBg, BorderSizePixel = 0,
@@ -336,6 +342,7 @@ local muteKey = Enum.KeyCode.V
 local listeningKey = false
 local selfPanel, sessionId, inject
 local suspendUntil, lastRetry = nil, 0
+local mutePath = "unknown"
 
 local function setStatus(title, color, sub)
     statusTitle.Text = title
@@ -359,23 +366,65 @@ local function pulse()
     end)
 end
 
--- ═══ MUTE ═══
-local function muteTier()
-    if audioInput() then return "audioinput" end
-    if typeof(VCS.PublishStateChange) == "function" then return "publish" end
-    return "key"
+-- ═══ MUTE PROBE ═══
+local function tryAudioInput()
+    local ai = audioInput()
+    if not ai then return false end
+    local before = readMute()
+    if not pcall(function() ai.Muted = true end) then return false end
+    task.wait(0.22)
+    local after = readMute()
+    pcall(function() ai.Muted = false end)
+    task.wait(0.12)
+    return (before ~= nil and after ~= nil and after ~= before)
 end
 
+local function tryPublish()
+    if typeof(VCS.PublishStateChange) ~= "function" then return false end
+    local before = readMute()
+    if not pcall(function() VCS:PublishStateChange(Enum.MuteState.Muted, sessionId) end) then return false end
+    task.wait(0.22)
+    local after = readMute()
+    pcall(function() VCS:PublishStateChange(Enum.MuteState.Unmuted, sessionId) end)
+    task.wait(0.12)
+    return (before ~= nil and after ~= nil and after ~= before)
+end
+
+local function tryKey()
+    local before = readMute()
+    pressKey(muteKey)
+    task.wait(0.3)
+    local after = readMute()
+    pressKey(muteKey)
+    task.wait(0.12)
+    return (before ~= nil and after ~= nil and after ~= before)
+end
+
+local function probeMute()
+    pcall(function() sessionId = VCS:getInternalSessionId() end)
+    if not audioInput() then
+        pcall(function() VCS.UseAudioApi = Enum.AudioApiRollout.Enabled end)
+        task.wait(0.5)
+    end
+    if tryAudioInput() then mutePath = "audioinput" return end
+    if tryPublish() then mutePath = "publish" return end
+    if tryKey() then mutePath = "key" return end
+    mutePath = "none"
+end
+
+-- ═══ MUTE ═══
 local function applyMute(state)
-    local tier = muteTier()
-    if tier == "audioinput" then
+    if mutePath == "audioinput" then
         local ai = audioInput()
         if ai and pcall(function() ai.Muted = state end) then return "audioinput" end
-    elseif tier == "publish" then
+    elseif mutePath == "publish" then
         if pcall(function()
             VCS:PublishStateChange(
                 state and Enum.MuteState.Muted or Enum.MuteState.Unmuted, sessionId)
         end) then return "publish" end
+    elseif mutePath == "key" then
+        pressKey(muteKey)
+        return "key"
     end
     pressKey(muteKey)
     return "key"
@@ -387,12 +436,6 @@ local function setMute(want)
     task.wait(0.28)
     local after = readMute()
     if before == nil or after == nil then muted = want return true, tier .. " sent" end
-    if after == before then
-        tier = applyMute(want)
-        task.wait(0.28)
-        after = readMute()
-    end
-    if after == nil then muted = want return true, tier .. " sent" end
     if after ~= before then muted = after return true, tier .. " verified" end
     muted = want
     return false, tier .. " no change"
@@ -406,19 +449,30 @@ local function republish()
         local ok2, err2 = pcall(function() VCS:rejoinVoice() end)
         if not ok2 then return false, tostring(err2) end
         task.wait(0.7)
-        return true, "no session — rejoined instead", snap().session ~= ""
+        return true, "no session — rejoined", snap().session ~= ""
     end
 
-    local ai = audioInput()
-    if ai then
-        pcall(function() ai.Muted = true end)
+    if mutePath == "none" or mutePath == "unknown" then
+        local ok, err = pcall(function() VCS:ClientRetryJoin() end)
+        if not ok then ok, err = pcall(function() VCS:rejoinVoice() end) end
+        task.wait(0.8)
+        return ok, ok and "retry join (no mute)" or tostring(err), snap().session ~= before.session
+    end
+
+    if mutePath == "audioinput" then
+        local ai = audioInput()
+        if ai then
+            pcall(function() ai.Muted = true end)
+            task.wait(0.2)
+            pcall(function() ai.Muted = false end)
+        end
+    elseif mutePath == "publish" then
+        pcall(function() VCS:PublishStateChange(Enum.MuteState.Muted, sessionId) end)
+        task.wait(0.2)
+        pcall(function() VCS:PublishStateChange(Enum.MuteState.Unmuted, sessionId) end)
     else
         pressKey(muteKey)
-    end
-    task.wait(0.2)
-    if ai then
-        pcall(function() ai.Muted = false end)
-    else
+        task.wait(0.2)
         pressKey(muteKey)
     end
     task.wait(0.45)
@@ -426,7 +480,7 @@ local function republish()
     local after = snap()
     local kept = (after.session == before.session)
     local live = (readMute() == false)
-    if kept and live then return true, "republished, session kept", true end
+    if kept and live then return true, "republished via " .. mutePath, true end
     return true, kept and "session kept, mic not live" or "session changed", false
 end
 
@@ -580,6 +634,7 @@ inject = function()
         return
     end
 
+    if mutePath == "unknown" then probeMute() end
     pcall(function() sessionId = VCS:getInternalSessionId() end)
     local ok, detail, verified = pcall(republish)
     injecting = false
@@ -593,7 +648,6 @@ inject = function()
 
     active = true
     verifiedOK = verified and true or false
-
     if verifiedOK then
         setStatus("ACTIVE", C.lime, "Verified · " .. tostring(detail))
         pulse()
@@ -659,6 +713,10 @@ task.spawn(function()
         diagIntern.TextColor3 = internalsOK and C.green or C.red
         diagInput.Text = s.input and "present" or "absent"
         diagInput.TextColor3 = s.input and C.green or C.muted
+        diagApi.Text = apiState()
+        diagPath.Text = mutePath
+        diagPath.TextColor3 = (mutePath == "none") and C.red
+            or (mutePath == "unknown") and C.muted or C.green
         task.wait(2)
     end
 end)
@@ -708,4 +766,7 @@ if queue_on_teleport then
     end)
 end
 
-task.delay(0.4, function() notify("press START") end)
+task.delay(1, function()
+    probeMute()
+    notify("mute path: " .. mutePath)
+end)
