@@ -1,7 +1,6 @@
 --[[────────────────────────────────────────────────────────────
     HADIS // M7 ANTI VC BAN + SELF MUTE
-    Legacy now matches mois7: leaveVoice only, icon drops, audio persists
-    Mute: AudioDeviceInput.Muted -> PublishStateChange -> keypress
+    warning -> auto-mute · suspension -> auto-dismiss + fast retry · recovery -> auto-unmute
     run: loadstring(game:HttpGet("https://raw.githubusercontent.com/hadisxchiken-ctrl/hadis41-/main/hadis.lua"))()
 ────────────────────────────────────────────────────────────]]
 
@@ -12,6 +11,7 @@ local UIS          = game:GetService("UserInputService")
 local VCS          = game:GetService("VoiceChatService")
 local VIM          = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
+local CoreGui      = game:GetService("CoreGui")
 
 local LP = Players.LocalPlayer
 
@@ -117,7 +117,7 @@ local function header(par, titleText, order, onMin, onClose)
     return h
 end
 
--- ═══ READ LAYER ═══
+-- ═══ READ ═══
 local function read(name)
     local ok, v = pcall(function() return VCS[name](VCS) end)
     if ok then return v end
@@ -155,10 +155,7 @@ local function tail(s)
 end
 
 local internalsOK = false
-do
-    local s = snap()
-    internalsOK = (s.paused ~= nil) or (s.session ~= "")
-end
+do local s = snap() internalsOK = (s.paused ~= nil) or (s.session ~= "") end
 
 local function pressKey(k)
     pcall(function()
@@ -171,6 +168,49 @@ end
 local function vcOff()
     local ok, place = pcall(function() return VCS.VoiceChatEnabledForPlaceOnRcc end)
     return ok and place == false
+end
+
+-- ═══ MODAL SCAN ═══
+local lastDismiss = 0
+local lastWarn = 0
+
+local function scanModals()
+    local warn, susp, mins
+    pcall(function()
+        for _, g in ipairs({ CoreGui, LP:FindFirstChild("PlayerGui") }) do
+            if g then
+                for _, d in ipairs(g:GetDescendants()) do
+                    if d:IsA("TextLabel") then
+                        local t = d.Text
+                        if t and #t < 220 then
+                            if t:find("lose access to voice", 1, true) then warn = true end
+                            local n = t:match("[Ss]uspended for (%d+)")
+                            if n then susp, mins = true, tonumber(n) end
+                            if t:find("suspended", 1, true) then susp = true end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return warn, susp, mins
+end
+
+local function clickOk()
+    if os.clock() - lastDismiss < 3 then return end
+    pcall(function()
+        for _, d in ipairs(CoreGui:GetDescendants()) do
+            if d:IsA("TextButton") and d.Text == "OK" and d.Visible
+            and d.AbsoluteSize.X > 40 and d.AbsoluteSize.Y > 20 then
+                local p = d.AbsolutePosition + d.AbsoluteSize / 2
+                lastDismiss = os.clock()
+                VIM:SendMouseButtonEvent(p.X, p.Y, 0, true, game, 0)
+                task.wait(0.06)
+                VIM:SendMouseButtonEvent(p.X, p.Y, 0, false, game, 0)
+                return
+            end
+        end
+    end)
 end
 
 -- ═══ PANEL ═══
@@ -237,7 +277,6 @@ local statusSub = mk("TextLabel", statusCard, {
     Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = C.muted, Text = "Pick a method below.",
     TextXAlignment = Enum.TextXAlignment.Left,
 })
-
 local refreshBtn = mk("TextButton", statusCard, {
     AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0),
     Size = UDim2.fromOffset(54, 20), BackgroundColor3 = C.card, BorderSizePixel = 0,
@@ -277,16 +316,6 @@ local diagInput   = diagRow("audioinput", 54)
 table.insert(body, section("METHOD", 6))
 
 -- ═══ METHODS ═══
-local function fnDisconnect()
-    local before = snap()
-    local ok, err = pcall(function() VCS:leaveVoice() end)
-    if not ok then return false, tostring(err) end
-    task.wait(0.8)
-    local after = snap()
-    local dropped = (after.channel == "" or after.session ~= before.session)
-    return true, dropped and "session dropped" or "session unchanged", dropped
-end
-
 local function fnRejoin()
     local before = snap()
     local ok, err = pcall(function() VCS:rejoinVoice() end)
@@ -295,6 +324,16 @@ local function fnRejoin()
     local after = snap()
     local rebuilt = (after.session ~= "" and after.session ~= before.session)
     return true, rebuilt and "session rebuilt" or "session unchanged", rebuilt
+end
+
+local function fnDisconnect()
+    local before = snap()
+    local ok, err = pcall(function() VCS:leaveVoice() end)
+    if not ok then return false, tostring(err) end
+    task.wait(0.8)
+    local after = snap()
+    local dropped = (after.channel == "" or after.session ~= before.session)
+    return true, dropped and "session dropped" or "session unchanged", dropped
 end
 
 local function fnCycle()
@@ -311,17 +350,14 @@ local function fnCycle()
 end
 
 local METHODS = {
-    { name = "Legacy (icon off)", short = "Legacy", tag = "RECOMMENDED", edge = C.green,
-      titleColor = C.white,
-      desc = "leaveVoice() only. Icon drops, audio keeps going. Same as mois7.",
-      fn = fnDisconnect },
-    { name = "Original Anti VC", short = "Original", tag = "DEFAULT", edge = C.blue,
-      titleColor = C.white,
-      desc = "rejoinVoice(). Full rebuild, icon returns. Cleaner UI, more disruptive.",
+    { name = "Original Anti VC", short = "Original", tag = "RECOMMENDED", edge = C.green,
+      titleColor = C.white, desc = "rejoinVoice(). Restores audio after suspension. Use this.",
       fn = fnRejoin },
+    { name = "Legacy (icon off)", short = "Legacy", tag = "DEFAULT", edge = C.blue,
+      titleColor = C.white, desc = "leaveVoice() only. Icon drops, audio continues. Same as mois7.",
+      fn = fnDisconnect },
     { name = "Revised Anti VC Ban", short = "Revised", tag = "EXPERIMENTAL", edge = C.amber,
-      titleColor = C.amber,
-      desc = "leaveVoice() then joinVoice(). Slowest, most visible.",
+      titleColor = C.amber, desc = "leaveVoice() then joinVoice(). Slowest.",
       fn = fnCycle },
 }
 
@@ -330,9 +366,8 @@ local active, injecting, verifiedOK = false, false, false
 local muted, pushTalk, pushMute = false, false, false
 local muteKey = Enum.KeyCode.V
 local listeningKey = false
-local selfPanel
-local sessionId
-local inject
+local selfPanel, sessionId, inject
+local suspendUntil, lastRetry = nil, 0
 
 local function paint()
     for i, c in ipairs(cards) do
@@ -426,7 +461,7 @@ end
 local footer = mk("TextLabel", panel, {
     Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
     TextSize = 8, TextColor3 = C.muted, LayoutOrder = 20,
-    Text = "Tap a method to test it · auto 20s · V to mute",
+    Text = "Warning = auto-mute · suspension = auto rejoin",
 })
 table.insert(body, footer)
 paint()
@@ -453,7 +488,7 @@ local function pulse()
     end)
 end
 
--- ═══ MUTE (tiered) ═══
+-- ═══ MUTE ═══
 local function muteTier()
     if audioInput() then return "audioinput" end
     if typeof(VCS.PublishStateChange) == "function" then return "publish" end
@@ -464,14 +499,12 @@ local function applyMute(state)
     local tier = muteTier()
     if tier == "audioinput" then
         local ai = audioInput()
-        local ok = pcall(function() ai.Muted = state end)
-        if ok then return "audioinput" end
+        if ai and pcall(function() ai.Muted = state end) then return "audioinput" end
     elseif tier == "publish" then
-        local ok = pcall(function()
+        if pcall(function()
             VCS:PublishStateChange(
                 state and Enum.MuteState.Muted or Enum.MuteState.Unmuted, sessionId)
-        end)
-        if ok then return "publish" end
+        end) then return "publish" end
     end
     pressKey(muteKey)
     return "key"
@@ -482,29 +515,21 @@ local function setMute(want)
     local tier = applyMute(want)
     task.wait(0.28)
     local after = readMute()
-
-    if before == nil or after == nil then
-        muted = want
-        return true, tier .. " sent"
-    end
+    if before == nil or after == nil then muted = want return true, tier .. " sent" end
     if after == before then
         tier = applyMute(want)
         task.wait(0.28)
         after = readMute()
     end
-    if after == nil then
-        muted = want
-        return true, tier .. " sent"
-    end
-    if after ~= before then
-        muted = after
-        return true, tier .. " verified"
-    end
+    if after == nil then muted = want return true, tier .. " sent" end
+    if after ~= before then muted = after return true, tier .. " verified" end
     muted = want
     return false, tier .. " no change"
 end
 
 -- ═══ SELF MUTE PANEL ═══
+local selfMicText, selfMicBody, selfMicBar, selfMicStem, selfCount, selfTier
+
 local function buildSelf()
     if selfPanel then selfPanel.Visible = true return end
 
@@ -527,37 +552,35 @@ local function buildSelf()
         for _, o in ipairs(mbody) do o.Visible = not o.Visible end
     end, function() m.Visible = false end))
 
-    local micRow = mk("Frame", m, { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, LayoutOrder = 2 })
+    local micRow = mk("Frame", m, { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, LayoutOrder = 2 })
     table.insert(mbody, micRow)
 
-    local micBody = mk("Frame", micRow, { Position = UDim2.fromOffset(2, 2),
+    selfMicBody = mk("Frame", micRow, { Position = UDim2.fromOffset(2, 2),
         Size = UDim2.fromOffset(8, 12), BackgroundColor3 = C.green, BorderSizePixel = 0 })
-    round(micBody, 4)
-    local micBar = mk("Frame", micRow, { Position = UDim2.fromOffset(1, 13),
+    round(selfMicBody, 4)
+    selfMicBar = mk("Frame", micRow, { Position = UDim2.fromOffset(1, 13),
         Size = UDim2.fromOffset(10, 2), BackgroundColor3 = C.green, BorderSizePixel = 0 })
-    local micStem = mk("Frame", micRow, { Position = UDim2.fromOffset(5, 14),
+    selfMicStem = mk("Frame", micRow, { Position = UDim2.fromOffset(5, 14),
         Size = UDim2.fromOffset(2, 5), BackgroundColor3 = C.green, BorderSizePixel = 0 })
 
-    local micText = mk("TextLabel", micRow, {
-        Position = UDim2.fromOffset(20, 0), Size = UDim2.new(1, -60, 1, 0), BackgroundTransparency = 1,
+    selfMicText = mk("TextLabel", micRow, {
+        Position = UDim2.fromOffset(20, 0), Size = UDim2.new(1, -60, 0, 13), BackgroundTransparency = 1,
         Font = Enum.Font.GothamMedium, TextSize = 11, TextColor3 = C.white,
         Text = "click to mute", TextXAlignment = Enum.TextXAlignment.Left })
-    local countLabel = mk("TextLabel", micRow, {
-        AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.fromOffset(28, 24),
+    selfTier = mk("TextLabel", micRow, {
+        Position = UDim2.fromOffset(20, 14), Size = UDim2.new(1, -60, 0, 11), BackgroundTransparency = 1,
+        Font = Enum.Font.Code, TextSize = 7, TextColor3 = C.muted, Text = "" })
+    selfCount = mk("TextLabel", micRow, {
+        AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 2), Size = UDim2.fromOffset(28, 24),
         BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 11,
         TextColor3 = C.green, Text = "—" })
     local micBtn = mk("TextButton", micRow, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "" })
-
-    local tierLabel = mk("TextLabel", micRow, {
-        Position = UDim2.fromOffset(20, 13), Size = UDim2.new(1, -60, 0, 10), BackgroundTransparency = 1,
-        Font = Enum.Font.Code, TextSize = 7, TextColor3 = C.muted, Text = "" })
 
     local keyRow = mk("Frame", m, { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, LayoutOrder = 3 })
     table.insert(mbody, keyRow)
     mk("TextLabel", keyRow, {
         Size = UDim2.new(1, -80, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-        TextSize = 10, TextColor3 = C.muted, Text = "mute key (keypress tier only)",
-        TextXAlignment = Enum.TextXAlignment.Left })
+        TextSize = 10, TextColor3 = C.muted, Text = "mute key", TextXAlignment = Enum.TextXAlignment.Left })
     local keyBox = mk("TextButton", keyRow, {
         AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
         Size = UDim2.fromOffset(64, 22), BackgroundColor3 = C.card, BorderSizePixel = 0, Text = "" })
@@ -608,25 +631,21 @@ local function buildSelf()
         Text = "Getting warnings can be normal. You will not lose voice chat privileges from this by itself. Avoid being reported by players.",
     }))
 
-    local function refreshMic()
-        local col = muted and C.muted or C.green
-        micBody.BackgroundColor3 = col
-        micBar.BackgroundColor3 = col
-        micStem.BackgroundColor3 = col
-        micText.Text = muted and "click to unmute" or "click to mute"
-    end
-
     local function doMute(want)
         local ok, why = setMute(want)
-        refreshMic()
-        tierLabel.Text = "via " .. why
-        countLabel.Text = muted and "10" or "—"
-        if not ok then countLabel.Text = "!" notify("mute failed: " .. why) end
+        local col = muted and C.muted or C.green
+        selfMicBody.BackgroundColor3 = col
+        selfMicBar.BackgroundColor3 = col
+        selfMicStem.BackgroundColor3 = col
+        selfMicText.Text = muted and "click to unmute" or "click to mute"
+        selfTier.Text = "via " .. why
+        selfCount.Text = muted and "10" or "—"
+        if not ok then selfCount.Text = "!" notify("mute failed: " .. why) end
         if muted then
             task.spawn(function()
                 for i = 10, 0, -1 do
                     if not muted or not m.Visible then return end
-                    countLabel.Text = tostring(i)
+                    selfCount.Text = tostring(i)
                     task.wait(1)
                 end
             end)
@@ -634,7 +653,6 @@ local function buildSelf()
     end
 
     micBtn.MouseButton1Click:Connect(function() doMute(not muted) end)
-
     keyBox.MouseButton1Click:Connect(function()
         listeningKey = true
         keyLabel.Text = "..."
@@ -655,8 +673,7 @@ inject = function()
     setStatus("TESTING", C.amber, "Probing " .. METHODS[selected].short .. "...")
 
     if vcOff() then
-        injecting = false
-        paint()
+        injecting = false paint()
         setStatus("NO VOICE", C.red, "Voice chat is off in this game.")
         return
     end
@@ -676,23 +693,59 @@ inject = function()
     active = true
     verifiedOK = verified and true or false
     paint()
-
     if verifiedOK then
         setStatus("ACTIVE", C.lime, "Verified · " .. tostring(detail))
         pulse()
         notify("verified: " .. METHODS[selected].short)
     else
         setStatus("UNVERIFIED", C.amber, "Ran, but " .. tostring(detail))
-        notify("ran, no change")
     end
-
     task.wait(0.7)
     buildSelf()
 end
 
 refreshBtn.MouseButton1Click:Connect(function() task.spawn(function() inject() end) end)
 
--- ═══ DIAG LOOP ═══
+-- ═══ WATCHER: warning + suspension ═══
+task.spawn(function()
+    while gui.Parent do
+        task.wait(2)
+        local warn, susp, mins = scanModals()
+
+        if susp then
+            clickOk()
+            if mins and not suspendUntil then
+                suspendUntil = os.clock() + mins * 60
+            end
+            active = false
+            local left = suspendUntil and math.max(0, math.ceil(suspendUntil - os.clock()))
+            setStatus("SUSPENDED", C.red,
+                left and ("lifts in " .. left .. "s — auto rejoin armed") or "suspended — retrying")
+            if os.clock() - lastRetry > 8 then
+                lastRetry = os.clock()
+                local ok = pcall(fnRejoin)
+                if ok and snap().session ~= "" then
+                    suspendUntil = nil
+                    if muted then setMute(false) end
+                    setStatus("ACTIVE", C.lime, "Recovered — rejoined")
+                    notify("voice recovered")
+                end
+            end
+        elseif warn then
+            clickOk()
+            if os.clock() - lastWarn > 5 then
+                lastWarn = os.clock()
+                setMute(true)
+                setStatus("WARNING", C.amber, "Auto-muted to stop escalation")
+                notify("warning — auto-muted")
+            end
+        elseif suspendUntil then
+            suspendUntil = nil
+        end
+    end
+end)
+
+-- ═══ DIAG ═══
 task.spawn(function()
     while gui.Parent do
         local s = snap()
@@ -737,11 +790,11 @@ UIS.InputEnded:Connect(function(i)
     elseif pushMute then applyMute(false) end
 end)
 
--- ═══ AUTO LOOP ═══
+-- ═══ AUTO ═══
 task.spawn(function()
     while gui.Parent do
         task.wait(20)
-        if active then
+        if active and not suspendUntil then
             if vcOff() then statusSub.Text = "Voice chat is off in this game."
             else pcall(METHODS[selected].fn) end
         end
