@@ -20,7 +20,6 @@ local HttpService      = game:GetService("HttpService")
 local Lighting         = game:GetService("Lighting")
 local Stats            = game:GetService("Stats")
 local VirtualUser      = game:GetService("VirtualUser")
-local SoundService     = game:GetService("SoundService")
 local RS               = game:GetService("ReplicatedStorage")
 
 local LP     = Players.LocalPlayer
@@ -36,13 +35,16 @@ local NAVY_DEEP = Color3.fromRGB(7, 10, 22)
 local TEXT      = Color3.fromRGB(233, 238, 251)
 local SUB       = Color3.fromRGB(159, 176, 208)
 local RED       = Color3.fromRGB(255, 120, 150)
-local LAV       = Color3.fromRGB(201, 184, 255)
 local MINT      = Color3.fromRGB(159, 230, 196)
 local LOGO      = "rbxassetid://10669437756353535"
 
 local F_BOLD = Enum.Font.GothamBold
 local F_MED  = Enum.Font.GothamMedium
 local F_TXT  = Enum.Font.Gotham
+
+-- ═══ FORWARD DECLARATIONS ═══
+local hub, drawer, renderCards, hum, onUnlocked, enterPasskey, makeWindow
+local spyWin, spyBody
 
 -- ═══ STATE ═══
 local binds      = {}
@@ -61,8 +63,7 @@ local flags = {
 	aim = false, xray = false, aura = false, parry = false, hitbox = false, spy = false, antvoid = false,
 }
 
--- remote registry
-local remotes = { list = {}, kill = nil, parry = nil, learned = nil, sig = nil, lit = nil, hits = 0 }
+local remotes = { list = {}, kill = nil, parry = nil, learned = nil, sig = nil, lit = nil }
 local sniffLog = {}
 local sniffing = false
 
@@ -385,7 +386,7 @@ UIS.InputChanged:Connect(function(i)
 	if progress >= 0.97 then
 		sliding = false
 		setProgress(1)
-		enterPasskey()
+		if enterPasskey then enterPasskey() end
 	end
 end)
 
@@ -482,9 +483,9 @@ local function tryUnlock()
 		task.wait(0.25)
 		gate.Visible = false
 		intro.Visible = false
-		hub.Visible = true
+		if hub then hub.Visible = true end
 		notify("unlocked")
-		task.spawn(onUnlocked)
+		if onUnlocked then task.spawn(onUnlocked) end
 	else
 		errLabel.Text = "wrong passkey"
 		stroke(input, RED, 1, 0.3)
@@ -496,14 +497,14 @@ end
 submit.MouseButton1Click:Connect(tryUnlock)
 input.FocusLost:Connect(function(enter) if enter then tryUnlock() end end)
 
-function enterPasskey()
+enterPasskey = function()
 	gate.Visible = true
 	task.wait(0.05)
 	pcall(function() input:CaptureFocus() end)
 end
 
 -- ═══ HUB ═══
-local hub = new("Frame", {
+hub = new("Frame", {
 	Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, ZIndex = 10,
 }, gui)
 
@@ -584,7 +585,7 @@ new("UIListLayout", {
 	Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder,
 }, chipsRow)
 
-local walkChip, jumpChip, pingChip, fpsChip, plrChip
+local walkChip, jumpChip, pingChip, plrChip
 local function chip(label)
 	local c = new("TextLabel", {
 		Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
@@ -598,7 +599,7 @@ end
 walkChip = chip("walk 16")
 jumpChip = chip("jump 50")
 pingChip = chip("ping —")
-fpsChip  = chip("fps —")
+chip("fps —")
 plrChip  = chip("players —")
 
 task.spawn(function()
@@ -610,7 +611,7 @@ task.spawn(function()
 			end)
 			pingChip.Text = "  ping " .. ((ok and ping) or "—") .. "  "
 			plrChip.Text  = "  players " .. #Players:GetPlayers() .. "  "
-			local h = hum()
+			local h = hum and hum()
 			if h then
 				walkChip.Text = "  walk " .. math.floor(h.WalkSpeed) .. "  "
 				jumpChip.Text = "  jump " .. math.floor(h.JumpPower) .. "  "
@@ -652,7 +653,7 @@ for _, t in ipairs(tabs) do
 	b.MouseButton1Click:Connect(function()
 		currentTab = t
 		paintTabs()
-		renderCards()
+		if renderCards then renderCards() end
 	end)
 end
 
@@ -664,7 +665,7 @@ local body = new("ScrollingFrame", {
 }, main)
 new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, body)
 
--- ═══ REMOTE SCANNER + LEARNER ═══
+-- ═══ REMOTE SCANNER ═══
 local KEYWORDS = {
 	"attack","hit","damage","swing","slash","m1","combat","strike","skill","cast",
 	"parry","block","guard","dodge","counter","projectile","ability","weapon","punch","shoot",
@@ -685,9 +686,9 @@ local function scanRemotes()
 	remotes.list = {}
 	remotes.learned, remotes.sig, remotes.lit = nil, nil, nil
 	local seen = {}
-	for _, root in ipairs({ RS, workspace, LP:FindFirstChild("PlayerScripts"), LP:FindFirstChild("PlayerGui") }) do
-		if root then
-			for _, d in ipairs(root:GetDescendants()) do
+	for _, r in ipairs({ RS, workspace, LP:FindFirstChild("PlayerScripts"), LP:FindFirstChild("PlayerGui") }) do
+		if r then
+			for _, d in ipairs(r:GetDescendants()) do
 				if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("UnreliableRemoteEvent"))
 					and not seen[d] then
 					seen[d] = true
@@ -703,9 +704,8 @@ local function scanRemotes()
 		if i > 40 then break end
 		if r.score >= 10 then
 			if not remotes.kill then remotes.kill = r.obj end
-			if not remotes.parry and (r.obj.Name:lower():find("par", 1, true)
-				or r.obj.Name:lower():find("block", 1, true)
-				or r.obj.Name:lower():find("guard", 1, true)) then
+			local n = r.obj.Name:lower()
+			if not remotes.parry and (n:find("par", 1, true) or n:find("block", 1, true) or n:find("guard", 1, true)) then
 				remotes.parry = r.obj
 			end
 		end
@@ -729,61 +729,49 @@ end
 local function describe(v)
 	local t = typeof(v)
 	if t == "Instance" then
-		if v:IsA("Player") then return "player", v end
-		if v:IsA("Humanoid") then return "hum", v end
-		if v:IsA("BasePart") and v.Parent and v.Parent:FindFirstChildOfClass("Humanoid") then return "part", v end
-		if v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") then return "char", v end
-		return "inst", v
+		if v:IsA("Player") then return "player" end
+		if v:IsA("Humanoid") then return "hum" end
+		if v:IsA("BasePart") and v.Parent and v.Parent:FindFirstChildOfClass("Humanoid") then return "part" end
+		if v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") then return "char" end
+		return "inst"
 	end
-	if t == "Vector3" then return "pos", v end
-	if t == "CFrame" then return "cf", v end
-	if t == "number" then return "num", v end
-	if t == "string" then return "str", v end
-	if t == "boolean" then return "bool", v end
-	return t:lower(), v
-end
-
-local function signatureOf(args, n)
-	local sig, lit = {}, {}
-	for i = 1, n do
-		local kind, val = describe(args[i])
-		sig[i] = kind
-		if kind == "pos" or kind == "cf" then
-			lit[i] = val
-		elseif kind == "num" or kind == "str" or kind == "bool" then
-			lit[i] = val
-		else
-			lit[i] = nil
-		end
-	end
-	return sig, lit
+	if t == "Vector3" then return "pos" end
+	if t == "CFrame" then return "cf" end
+	if t == "number" then return "num" end
+	if t == "string" then return "str" end
+	if t == "boolean" then return "bool" end
+	return t:lower()
 end
 
 local function armHook(r)
 	if r.hooked or not hookfunction then return end
 	r.hooked = true
 	local isFn = r.obj:IsA("RemoteFunction")
-	local key = isFn and "InvokeServer" or "FireServer"
-	local orig = r.obj[key]
+	local orig = r.obj[isFn and "InvokeServer" or "FireServer"]
 	pcall(function()
 		hookfunction(orig, function(self, ...)
 			local n = select("#", ...)
 			r.hits += 1
 			if sniffing then
 				local types = {}
-				for i = 1, n do
-					local k = describe((select(i, ...)))
-					types[i] = k
-				end
+				for i = 1, n do types[i] = describe((select(i, ...))) end
 				table.insert(sniffLog, 1, r.obj.Name .. " (" .. table.concat(types, ", ") .. ")")
 				if #sniffLog > 12 then table.remove(sniffLog) end
 				if devSniffLabel then devSniffLabel.Text = table.concat(sniffLog, "\n") end
 			end
 			if r.score >= 10 and n > 0 and not remotes.learned then
-				local sig, lit = signatureOf({ ... }, n)
+				local sig, lit = {}, {}
 				local hasTarget = false
-				for _, k in ipairs(sig) do
-					if k == "player" or k == "char" or k == "hum" or k == "part" then hasTarget = true end
+				for i = 1, n do
+					local kind = describe((select(i, ...)))
+					sig[i] = kind
+					local v = select(i, ...)
+					if kind == "pos" or kind == "cf" or kind == "num" or kind == "str" or kind == "bool" then
+						lit[i] = v
+					end
+					if kind == "player" or kind == "char" or kind == "hum" or kind == "part" then
+						hasTarget = true
+					end
 				end
 				if hasTarget then
 					remotes.learned, remotes.sig, remotes.lit = r.obj, sig, lit
@@ -796,13 +784,11 @@ local function armHook(r)
 end
 
 local function armAll(limit)
-	for i = 1, math.min(#remotes.list, limit or 40) do
-		armHook(remotes.list[i])
-	end
+	for i = 1, math.min(#remotes.list, limit or 40) do armHook(remotes.list[i]) end
 end
 
 -- ═══ EXEC LOGIC ═══
-local function hum()
+hum = function()
 	return LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
 end
 
@@ -845,9 +831,8 @@ local function fireLearned(target)
 		n += 1
 		args[n] = v
 	end
-	local isFn = remotes.learned:IsA("RemoteFunction")
 	pcall(function()
-		if isFn then
+		if remotes.learned:IsA("RemoteFunction") then
 			remotes.learned:InvokeServer(table.unpack(args, 1, n))
 		else
 			remotes.learned:FireServer(table.unpack(args, 1, n))
@@ -864,7 +849,6 @@ local function fireMatrix(r, target)
 	pcall(function() r:FireServer(ch) end)
 	pcall(function() r:FireServer(hrp) end)
 	pcall(function() r:FireServer(h) end)
-	pcall(function() r:FireServer(hrp.Position) end)
 end
 
 local function setAura(on)
@@ -925,8 +909,6 @@ local function setHitbox(on)
 	end
 end
 
-local spyWin, spyBody
-
 local function addSpy(text)
 	if not spyBody then return end
 	new("TextLabel", {
@@ -966,6 +948,15 @@ end
 local function setSpy(on)
 	flags.spy = on
 	installSpy()
+	if on and not spyWin then
+		spyWin = makeWindow("chat spy", UDim2.fromOffset(340, 240), { 320, 200 })
+		spyBody = new("ScrollingFrame", {
+			Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+			ScrollBarThickness = 3, ScrollBarImageColor3 = PINK,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 62,
+		}, spyWin.body)
+		new("UIListLayout", { Padding = UDim.new(0, 2) }, spyBody)
+	end
 	if spyWin then spyWin.win.Visible = on end
 end
 
@@ -1138,9 +1129,7 @@ local function setAntiVoid(on)
 		local h = ch and ch:FindFirstChildOfClass("Humanoid")
 		local r = ch and ch:FindFirstChild("HumanoidRootPart")
 		if not r or not h then return end
-		if h.FloorMaterial ~= Enum.Material.Air and r.Position.Y > -40 then
-			safe = r.CFrame
-		end
+		if h.FloorMaterial ~= Enum.Material.Air and r.Position.Y > -40 then safe = r.CFrame end
 		if r.Position.Y < (workspace.FallenPartsDestroyHeight + 40) and safe then
 			r.CFrame = safe + Vector3.new(0, 6, 0)
 			r.Velocity = Vector3.zero
@@ -1170,17 +1159,12 @@ local function serverHop()
 end
 
 local function rejoin()
-	pcall(function()
-		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
-	end)
+	pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP) end)
 end
 
 local function respawn()
-	local ch = LP.Character
-	if ch then
-		local h = ch:FindFirstChildOfClass("Humanoid")
-		if h then h.Health = 0 end
-	end
+	local h = hum()
+	if h then h.Health = 0 end
 end
 
 local function saveConfig()
@@ -1204,7 +1188,7 @@ local function loadConfig()
 	renderCards()
 end
 
--- card builder
+-- ═══ CARDS ═══
 local cardRefs = {}
 
 local function makeCard(name, sub, kind, default)
@@ -1286,7 +1270,7 @@ local function label(txt)
 end
 
 -- ═══ WINDOW FACTORY ═══
-local function makeWindow(title, size, offset)
+makeWindow = function(title, size, offset)
 	local win = new("Frame", {
 		Size = size, Position = UDim2.fromOffset(offset[1], offset[2]),
 		BackgroundColor3 = NAVY, BackgroundTransparency = 0.05,
@@ -1488,8 +1472,7 @@ local function voiceState()
 end
 
 local function injectAnti()
-	if injecting then return
-	end
+	if injecting then return end
 	injecting = true
 	anti.win.Visible = true
 	anti.expanded = true
@@ -1528,7 +1511,6 @@ paintMethods()
 
 refreshBtn.MouseButton1Click:Connect(function() task.spawn(injectAnti) end)
 
--- watchdog: pindot + state check
 task.spawn(function()
 	local lastState = ""
 	while true do
@@ -1641,14 +1623,13 @@ new("TextLabel", {
 new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, selfWin.body)
 pad(selfWin.body, 2)
 
--- ═══ DEV / DUMPER WINDOW ═══
+-- ═══ DEV WINDOW ═══
 local devWin
 local devSniffLabel
 
 local function buildDevWindow()
-	local obj = makeWindow("remote dumper", UDim2.fromOffset(440, 420), { 230, 80 })
-	devWin = obj
-	local b = obj.body
+	devWin = makeWindow("remote dumper", UDim2.fromOffset(440, 420), { 230, 80 })
+	local b = devWin.body
 
 	local rowA = new("Frame", { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 62 }, b)
 	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }, rowA)
@@ -1666,7 +1647,7 @@ local function buildDevWindow()
 	local scanBtn = mini("scan", 58)
 	local copyBtn = mini("copy", 52)
 	local saveBtn = mini("save", 48)
-	local sniffBtn = mini("sniffer", 62, LAV)
+	local sniffBtn = mini("sniffer", 62, MINT)
 	local learnBtn = mini("auto-learn", 78, MINT)
 
 	local info = new("TextLabel", {
@@ -1700,8 +1681,7 @@ local function buildDevWindow()
 		for _, c in ipairs(list:GetChildren()) do
 			if c:IsA("Frame") then c:Destroy() end
 		end
-		info.Text = #remotes.list .. " remotes  •  learned=" ..
-			(remotes.learned and remotes.learned.Name or "—")
+		info.Text = #remotes.list .. " remotes  •  learned=" .. (remotes.learned and remotes.learned.Name or "—")
 		for i = 1, math.min(#remotes.list, 90) do
 			local r = remotes.list[i]
 			local row = new("Frame", { Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, ZIndex = 63 }, list)
@@ -1731,9 +1711,7 @@ local function buildDevWindow()
 	end
 
 	scanBtn.MouseButton1Click:Connect(function()
-		scanRemotes()
-		armAll(40)
-		renderList()
+		scanRemotes(); armAll(40); renderList()
 		notify("naka-scan: " .. #remotes.list)
 	end)
 	copyBtn.MouseButton1Click:Connect(function()
@@ -1762,10 +1740,9 @@ local function buildDevWindow()
 	end)
 
 	renderList()
-	return obj
 end
 
-local function renderCards()
+renderCards = function()
 	for _, c in ipairs(body:GetChildren()) do
 		if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
 	end
@@ -1861,8 +1838,7 @@ local function renderCards()
 			devWin.win.Visible = true
 		end))
 		table.insert(cardRefs, makeCard("scan remotes", "auto-assign ang attack", function()
-			scanRemotes()
-			armAll(40)
+			scanRemotes(); armAll(40)
 			devWin.win.Visible = true
 			notify("naka-scan: " .. #remotes.list)
 		end))
@@ -1877,7 +1853,6 @@ local function renderCards()
 		end))
 	end
 
-	-- auto execute
 	local autoRow = new("Frame", {
 		Size = UDim2.new(1, 0, 0, 62), BackgroundColor3 = Color3.fromRGB(20, 26, 48),
 		BackgroundTransparency = 0.12, BorderSizePixel = 0, ZIndex = 23,
@@ -1948,12 +1923,12 @@ pawBtn.MouseButton1Click:Connect(function()
 end)
 paintPaw()
 
-gearBtn.MouseButton1Click:Connect(function() drawer.Visible = not drawer.Visible end)
+gearBtn.MouseButton1Click:Connect(function() if drawer then drawer.Visible = not drawer.Visible end end)
 menuBtn.MouseButton1Click:Connect(function() main.Visible = not main.Visible end)
 hideBtn.MouseButton1Click:Connect(function() main.Visible = false end)
 
--- ═══ SETTINGS DRAWER ═══
-local drawer = new("Frame", {
+-- ═══ DRAWER ═══
+drawer = new("Frame", {
 	Size = UDim2.fromOffset(200, 128), Position = UDim2.new(1, -212, 0, 96),
 	BackgroundColor3 = NAVY, BackgroundTransparency = 0.05,
 	BorderSizePixel = 0, Visible = false, ZIndex = 50,
@@ -1990,7 +1965,6 @@ local function drawerRow(txt, default, cb)
 		sw.TextColor3 = state and NAVY_DEEP or SUB
 		if cb then cb(state) end
 	end)
-	return sw
 end
 
 drawerRow("falling paws", true, function(v)
@@ -2019,7 +1993,7 @@ local unhide = new("TextButton", {
 corner(unhide, 6)
 unhide.MouseButton1Click:Connect(function() main.Visible = true end)
 
--- ═══ BIND LISTENER ═══
+-- ═══ BINDS ═══
 UIS.InputBegan:Connect(function(inp, processed)
 	if processed then return end
 
@@ -2045,7 +2019,7 @@ UIS.InputBegan:Connect(function(inp, processed)
 	end
 end)
 
--- ═══ GLOBAL HANDLERS ═══
+-- ═══ GLOBAL ═══
 UIS.JumpRequest:Connect(function()
 	if flags.infjump and hum() then hum():ChangeState(Enum.HumanoidStateType.Jumping) end
 end)
@@ -2063,8 +2037,7 @@ LP.Idled:Connect(function()
 	VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- ═══ UNLOCK HOOK ═══
-function onUnlocked()
+onUnlocked = function()
 	task.wait(0.4)
 	scanRemotes()
 	armAll(40)
