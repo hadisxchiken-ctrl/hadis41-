@@ -1,6 +1,7 @@
 --[[────────────────────────────────────────────────────────────
     HADIS // M7 ANTI VC BAN + SELF MUTE
-    warning -> auto-mute · suspension -> auto-dismiss + fast retry · recovery -> auto-unmute
+    Single method: republish (mute->unmute, session stays, audio keeps working)
+    warning -> auto-mute · suspension -> auto rejoin
     run: loadstring(game:HttpGet("https://raw.githubusercontent.com/hadisxchiken-ctrl/hadis41-/main/hadis.lua"))()
 ────────────────────────────────────────────────────────────]]
 
@@ -21,8 +22,8 @@ local C = {
     lime = Color3.fromRGB(200, 242, 66), limeDim = Color3.fromRGB(96, 118, 44),
     white = Color3.fromRGB(238, 240, 236), muted = Color3.fromRGB(126, 130, 124),
     green = Color3.fromRGB(62, 163, 74), greenBg = Color3.fromRGB(24, 46, 26),
-    blue = Color3.fromRGB(59, 130, 246), amber = Color3.fromRGB(217, 119, 6),
-    red = Color3.fromRGB(232, 110, 110), track = Color3.fromRGB(58, 62, 58),
+    amber = Color3.fromRGB(217, 119, 6), red = Color3.fromRGB(232, 110, 110),
+    track = Color3.fromRGB(58, 62, 58),
 }
 
 local host = LP:WaitForChild("PlayerGui")
@@ -171,8 +172,7 @@ local function vcOff()
 end
 
 -- ═══ MODAL SCAN ═══
-local lastDismiss = 0
-local lastWarn = 0
+local lastDismiss, lastWarn = 0, 0
 
 local function scanModals()
     local warn, susp, mins
@@ -274,7 +274,7 @@ local statusTitle = mk("TextLabel", statusCard, {
 })
 local statusSub = mk("TextLabel", statusCard, {
     Position = UDim2.fromOffset(32, 27), Size = UDim2.new(1, -80, 0, 16), BackgroundTransparency = 1,
-    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = C.muted, Text = "Pick a method below.",
+    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = C.muted, Text = "Press START.",
     TextXAlignment = Enum.TextXAlignment.Left,
 })
 local refreshBtn = mk("TextButton", statusCard, {
@@ -313,158 +313,29 @@ local diagMic     = diagRow("mic", 30)
 local diagIntern  = diagRow("internals", 42)
 local diagInput   = diagRow("audioinput", 54)
 
-table.insert(body, section("METHOD", 6))
+local startBtn = mk("TextButton", panel, {
+    Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = C.greenBg, BorderSizePixel = 0,
+    Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = C.lime,
+    Text = "START", LayoutOrder = 6,
+})
+round(startBtn, 7)
+outline(startBtn, C.green, 1)
+table.insert(body, startBtn)
 
--- ═══ METHODS ═══
-local function fnRejoin()
-    local before = snap()
-    local ok, err = pcall(function() VCS:rejoinVoice() end)
-    if not ok then return false, tostring(err) end
-    task.wait(0.7)
-    local after = snap()
-    local rebuilt = (after.session ~= "" and after.session ~= before.session)
-    return true, rebuilt and "session rebuilt" or "session unchanged", rebuilt
-end
+local footer = mk("TextLabel", panel, {
+    Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+    TextSize = 8, TextColor3 = C.muted, LayoutOrder = 20,
+    Text = "Auto 20s · warning = auto-mute · V to mute",
+})
+table.insert(body, footer)
 
-local function fnDisconnect()
-    local before = snap()
-    local ok, err = pcall(function() VCS:leaveVoice() end)
-    if not ok then return false, tostring(err) end
-    task.wait(0.8)
-    local after = snap()
-    local dropped = (after.channel == "" or after.session ~= before.session)
-    return true, dropped and "session dropped" or "session unchanged", dropped
-end
-
-local function fnCycle()
-    local before = snap()
-    local ok, err = pcall(function() VCS:leaveVoice() end)
-    if not ok then return false, tostring(err) end
-    task.wait(0.4)
-    local ok2, err2 = pcall(function() VCS:joinVoice() end)
-    if not ok2 then return false, tostring(err2) end
-    task.wait(0.7)
-    local after = snap()
-    local rebuilt = (after.session ~= "" and after.session ~= before.session)
-    return true, rebuilt and "session rebuilt" or "session unchanged", rebuilt
-end
-
-local METHODS = {
-    { name = "Original Anti VC", short = "Original", tag = "RECOMMENDED", edge = C.green,
-      titleColor = C.white, desc = "rejoinVoice(). Restores audio after suspension. Use this.",
-      fn = fnRejoin },
-    { name = "Legacy (icon off)", short = "Legacy", tag = "DEFAULT", edge = C.blue,
-      titleColor = C.white, desc = "leaveVoice() only. Icon drops, audio continues. Same as mois7.",
-      fn = fnDisconnect },
-    { name = "Revised Anti VC Ban", short = "Revised", tag = "EXPERIMENTAL", edge = C.amber,
-      titleColor = C.amber, desc = "leaveVoice() then joinVoice(). Slowest.",
-      fn = fnCycle },
-}
-
-local cards, selected = {}, 1
+-- ═══ STATE ═══
 local active, injecting, verifiedOK = false, false, false
 local muted, pushTalk, pushMute = false, false, false
 local muteKey = Enum.KeyCode.V
 local listeningKey = false
 local selfPanel, sessionId, inject
 local suspendUntil, lastRetry = nil, 0
-
-local function paint()
-    for i, c in ipairs(cards) do
-        local sel = (i == selected)
-        c.inner.Visible = sel and active and verifiedOK
-        c.cardStroke.Color = sel and (verifiedOK and C.lime or c.data.edge) or c.data.edge
-        if sel and active and verifiedOK then
-            c.btn.BackgroundColor3 = C.greenBg
-            c.btn.TextColor3 = C.lime
-            c.btn.Text = "ACTIVE"
-        elseif sel and injecting then
-            c.btn.BackgroundColor3 = C.card
-            c.btn.TextColor3 = C.amber
-            c.btn.Text = "TESTING"
-        elseif sel then
-            c.btn.BackgroundColor3 = C.card
-            c.btn.TextColor3 = c.data.edge
-            c.btn.Text = "SELECTED"
-        else
-            c.btn.BackgroundColor3 = C.card
-            c.btn.TextColor3 = c.data.edge
-            c.btn.Text = "SELECT"
-        end
-    end
-end
-
-for i, data in ipairs(METHODS) do
-    local card = mk("Frame", panel, {
-        Size = UDim2.new(1, 0, 0, 76), BackgroundColor3 = C.card, BorderSizePixel = 0, LayoutOrder = 6 + i,
-    })
-    round(card, 8)
-    local cardStroke = outline(card, data.edge, 1)
-    table.insert(body, card)
-
-    mk("Frame", card, { Size = UDim2.fromOffset(3, 76), BackgroundColor3 = data.edge, BorderSizePixel = 0 })
-
-    local radio = mk("Frame", card, {
-        Position = UDim2.fromOffset(13, 14), Size = UDim2.fromOffset(14, 14),
-        BackgroundTransparency = 1, BorderSizePixel = 0,
-    })
-    round(radio, 7)
-    outline(radio, data.edge, 2)
-    local inner = mk("Frame", radio, {
-        Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(4, 4),
-        BackgroundColor3 = C.lime, BorderSizePixel = 0, Visible = false,
-    })
-    round(inner, 3)
-
-    mk("TextLabel", card, {
-        Position = UDim2.fromOffset(35, 9), Size = UDim2.new(1, -140, 0, 15), BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = data.titleColor, Text = data.name,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    })
-    local badge = mk("Frame", card, {
-        Position = UDim2.fromOffset(35, 26), Size = UDim2.fromOffset(#data.tag * 5 + 12, 14),
-        BackgroundColor3 = C.pill, BorderSizePixel = 0,
-    })
-    round(badge, 4)
-    mk("TextLabel", badge, {
-        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
-        TextSize = 8, TextColor3 = data.edge, Text = data.tag,
-    })
-    mk("TextLabel", card, {
-        Position = UDim2.fromOffset(35, 44), Size = UDim2.new(1, -110, 0, 24), BackgroundTransparency = 1,
-        Font = Enum.Font.Gotham, TextSize = 9, TextColor3 = C.muted, Text = data.desc,
-        TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-    })
-    local btn = mk("TextButton", card, {
-        AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 14),
-        Size = UDim2.fromOffset(62, 28), BackgroundColor3 = C.card, BorderSizePixel = 0,
-        Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = data.edge, Text = "SELECT",
-    })
-    round(btn, 6)
-    outline(btn, data.edge, 1)
-
-    table.insert(cards, { cardStroke = cardStroke, inner = inner, btn = btn, data = data })
-
-    local function choose()
-        selected = i
-        paint()
-        task.spawn(function() inject() end)
-    end
-    btn.MouseButton1Click:Connect(choose)
-    card.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then choose() end
-    end)
-end
-
-local footer = mk("TextLabel", panel, {
-    Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-    TextSize = 8, TextColor3 = C.muted, LayoutOrder = 20,
-    Text = "Warning = auto-mute · suspension = auto rejoin",
-})
-table.insert(body, footer)
-paint()
 
 local function setStatus(title, color, sub)
     statusTitle.Text = title
@@ -525,6 +396,38 @@ local function setMute(want)
     if after ~= before then muted = after return true, tier .. " verified" end
     muted = want
     return false, tier .. " no change"
+end
+
+-- ═══ THE METHOD ═══
+local function republish()
+    local before = snap()
+
+    if before.session == "" then
+        local ok2, err2 = pcall(function() VCS:rejoinVoice() end)
+        if not ok2 then return false, tostring(err2) end
+        task.wait(0.7)
+        return true, "no session — rejoined instead", snap().session ~= ""
+    end
+
+    local ai = audioInput()
+    if ai then
+        pcall(function() ai.Muted = true end)
+    else
+        pressKey(muteKey)
+    end
+    task.wait(0.2)
+    if ai then
+        pcall(function() ai.Muted = false end)
+    else
+        pressKey(muteKey)
+    end
+    task.wait(0.45)
+
+    local after = snap()
+    local kept = (after.session == before.session)
+    local live = (readMute() == false)
+    if kept and live then return true, "republished, session kept", true end
+    return true, kept and "session kept, mic not live" or "session changed", false
 end
 
 -- ═══ SELF MUTE PANEL ═══
@@ -669,44 +572,44 @@ end
 inject = function()
     if injecting then return end
     injecting, active, verifiedOK = true, false, false
-    paint()
-    setStatus("TESTING", C.amber, "Probing " .. METHODS[selected].short .. "...")
+    setStatus("TESTING", C.amber, "Republishing...")
 
     if vcOff() then
-        injecting = false paint()
+        injecting = false
         setStatus("NO VOICE", C.red, "Voice chat is off in this game.")
         return
     end
 
     pcall(function() sessionId = VCS:getInternalSessionId() end)
-    local ok, detail, verified = pcall(METHODS[selected].fn)
+    local ok, detail, verified = pcall(republish)
     injecting = false
 
     if not ok then
         active, verifiedOK = false, false
-        paint()
         setStatus("FAILED", C.red, tostring(detail):sub(1, 44))
-        notify("failed: " .. METHODS[selected].short)
+        notify("republish failed")
         return
     end
 
     active = true
     verifiedOK = verified and true or false
-    paint()
+
     if verifiedOK then
         setStatus("ACTIVE", C.lime, "Verified · " .. tostring(detail))
         pulse()
-        notify("verified: " .. METHODS[selected].short)
+        notify("anti vc ban active")
     else
         setStatus("UNVERIFIED", C.amber, "Ran, but " .. tostring(detail))
     end
-    task.wait(0.7)
+
+    task.wait(0.6)
     buildSelf()
 end
 
+startBtn.MouseButton1Click:Connect(function() task.spawn(function() inject() end) end)
 refreshBtn.MouseButton1Click:Connect(function() task.spawn(function() inject() end) end)
 
--- ═══ WATCHER: warning + suspension ═══
+-- ═══ WATCHER ═══
 task.spawn(function()
     while gui.Parent do
         task.wait(2)
@@ -714,16 +617,14 @@ task.spawn(function()
 
         if susp then
             clickOk()
-            if mins and not suspendUntil then
-                suspendUntil = os.clock() + mins * 60
-            end
+            if mins and not suspendUntil then suspendUntil = os.clock() + mins * 60 end
             active = false
             local left = suspendUntil and math.max(0, math.ceil(suspendUntil - os.clock()))
             setStatus("SUSPENDED", C.red,
                 left and ("lifts in " .. left .. "s — auto rejoin armed") or "suspended — retrying")
             if os.clock() - lastRetry > 8 then
                 lastRetry = os.clock()
-                local ok = pcall(fnRejoin)
+                local ok = pcall(function() VCS:rejoinVoice() end)
                 if ok and snap().session ~= "" then
                     suspendUntil = nil
                     if muted then setMute(false) end
@@ -796,7 +697,7 @@ task.spawn(function()
         task.wait(20)
         if active and not suspendUntil then
             if vcOff() then statusSub.Text = "Voice chat is off in this game."
-            else pcall(METHODS[selected].fn) end
+            else pcall(republish) end
         end
     end
 end)
@@ -807,4 +708,4 @@ if queue_on_teleport then
     end)
 end
 
-task.delay(0.4, function() notify("tap a method to test it") end)
+task.delay(0.4, function() notify("press START") end)
