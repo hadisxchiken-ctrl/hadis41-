@@ -2,29 +2,24 @@
 	HADIS  //  kani - zafi
 	passkey: hadis
 
-	Host: i-upload ito sa public GitHub repo, tapos gamitin ang raw link.
-	Executor: i-paste ang loadstring sa ibaba, o ilagay sa autoexec folder.
-
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/USER/REPO/main/hadis.lua"))()
+	Executor:
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/hadischxken-ctrl/hadis41-/main/hadis.lua"))()
 ]]
 
-local LOADER_URL = "https://raw.githubusercontent.com/hadis-hub/main/loader.lua"
+local LOADER_URL = "https://raw.githubusercontent.com/hadischxken-ctrl/hadis41-/main/hadis.lua"
 local PASSKEY = "hadis"
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 local LP = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- palette
 local PINK       = Color3.fromRGB(255, 194, 221)
 local PINK_DEEP  = Color3.fromRGB(255, 159, 198)
 local PINK_SOFT  = Color3.fromRGB(255, 215, 231)
 local NAVY       = Color3.fromRGB(13, 19, 38)
-local NAVY_DEEP  = Color3.fromRGB(8, 10, 20)
 local TEXT       = Color3.fromRGB(233, 238, 251)
 local SUB        = Color3.fromRGB(159, 176, 208)
 local LAV        = Color3.fromRGB(201, 184, 255)
@@ -32,18 +27,13 @@ local PEACH      = Color3.fromRGB(255, 207, 158)
 
 local LOGO = "rbxassetid://10669437756353535"
 
--- state
 local binds = {}
 local autoOn = false
 local mode = "night"
 local pawsOn = true
-local unlocked = false
 local injecting = false
 local listening = nil
 
----------------------------------------------------------------------
--- helpers
----------------------------------------------------------------------
 local function new(class, props, parent)
 	local o = Instance.new(class)
 	for k, v in pairs(props or {}) do
@@ -92,12 +82,11 @@ local function txt(parent, text, size, color, bold)
 		TextSize = size,
 		TextColor3 = color or TEXT,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		RichText = false,
 	}, parent)
 end
 
 local function btn(parent, text, size, color)
-	local b = new("TextButton", {
+	return new("TextButton", {
 		BackgroundTransparency = 1,
 		AutoButtonColor = false,
 		Font = Enum.Font.GothamBold,
@@ -105,22 +94,16 @@ local function btn(parent, text, size, color)
 		TextSize = size or 10,
 		TextColor3 = color or SUB,
 	}, parent)
-	return b
 end
 
 local function roundBtn(parent, glyph, size, color)
 	local b = btn(parent, glyph, size or 11, color or SUB)
 	b.Size = UDim2.fromOffset(22, 22)
-	b.TextColor3 = color or SUB
-	new("UIPadding", {}, b)
 	corner(b, 6)
 	stroke(b, Color3.new(1, 1, 1), 1, 0.93)
 	return b
 end
 
----------------------------------------------------------------------
--- gui root
----------------------------------------------------------------------
 local gui = new("ScreenGui", {
 	Name = "HadisHub",
 	ResetOnSpawn = false,
@@ -147,15 +130,11 @@ end
 fit()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
 
----------------------------------------------------------------------
--- toast
----------------------------------------------------------------------
 local toast = new("TextLabel", {
 	BackgroundColor3 = PINK,
 	BackgroundTransparency = 0.06,
 	Size = UDim2.fromOffset(180, 26),
 	Position = UDim2.new(0.5, -90, 1, -30),
-	AnchorPoint = Vector2.new(0, 0),
 	Font = Enum.Font.GothamBold,
 	Text = "",
 	TextSize = 10,
@@ -171,7 +150,6 @@ local function notify(message)
 	local token = toastToken
 	toast.Text = message:lower()
 	toast.Visible = true
-	toast.TextTransparency = 0
 	task.delay(1.6, function()
 		if token == toastToken then
 			toast.Visible = false
@@ -179,11 +157,8 @@ local function notify(message)
 	end)
 end
 
----------------------------------------------------------------------
 -- scene
----------------------------------------------------------------------
 local scene = new("Frame", {
-	Name = "Scene",
 	Size = UDim2.fromScale(1, 1),
 	BackgroundTransparency = 1,
 	ClipsDescendants = true,
@@ -199,13 +174,12 @@ for _ = 1, 70 do
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = math.random(15, 60) / 100,
 		Size = UDim2.fromOffset(2, 2),
-		Position = UDim2.fromScale(math.random() / 1, math.random() / 1),
+		Position = UDim2.fromScale(math.random(), math.random()),
 		ZIndex = 2,
 	}, starHolder)
 	corner(s, 2)
 end
 
--- clouds
 local cloudHolder = new("Frame", { Size = UDim2.fromScale(1, 0.5), BackgroundTransparency = 1, ZIndex = 2 }, scene)
 local function cloud(px, py, w, h, trans)
 	local c = new("Frame", {
@@ -216,14 +190,12 @@ local function cloud(px, py, w, h, trans)
 		ZIndex = 2,
 	}, cloudHolder)
 	corner(c, h / 2)
-	return c
 end
 cloud(0.02, 0.14, 210, 78, 0.25)
 cloud(0.05, 0.34, 180, 70, 0.35)
 cloud(0.42, 0.30, 250, 95, 0.45)
 cloud(0.78, 0.44, 210, 80, 0.5)
 
--- moon glow + moon
 local glow = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(255, 169, 205),
 	BackgroundTransparency = 0.86,
@@ -242,7 +214,6 @@ local moon = new("Frame", {
 corner(moon, 92)
 local moonGrad = grad(moon, Color3.new(1, 1, 1), Color3.fromRGB(247, 168, 201), 120)
 
--- water
 local water = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(21, 17, 34),
 	Size = UDim2.new(1, 0, 0, 180),
@@ -252,7 +223,6 @@ local water = new("Frame", {
 }, scene)
 grad(water, Color3.fromRGB(91, 71, 103), Color3.fromRGB(10, 8, 18), 90)
 
--- glitter
 local glitter = new("Frame", { Size = UDim2.fromScale(1, 0.25), Position = UDim2.fromOffset(0, 470), BackgroundTransparency = 1, ZIndex = 4 }, scene)
 for i = 1, 8 do
 	local e = new("Frame", {
@@ -265,9 +235,7 @@ for i = 1, 8 do
 	corner(e, 2)
 end
 
--- wave crests
 local waveHolder = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 4 }, scene)
-local waves = {}
 for i = 1, 6 do
 	local w = new("Frame", {
 		BackgroundColor3 = Color3.fromRGB(243, 230, 238),
@@ -277,10 +245,8 @@ for i = 1, 6 do
 		ZIndex = 4,
 	}, waveHolder)
 	corner(w, 20)
-	table.insert(waves, w)
 end
 
--- shoreline foam
 local foam = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(243, 230, 238),
 	BackgroundTransparency = 0.5,
@@ -290,7 +256,6 @@ local foam = new("Frame", {
 }, scene)
 corner(foam, 12)
 
--- sand
 local sand = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(78, 61, 74),
 	Size = UDim2.new(1, 0, 0, 115),
@@ -300,7 +265,6 @@ local sand = new("Frame", {
 }, scene)
 grad(sand, Color3.fromRGB(111, 90, 104), Color3.fromRGB(42, 32, 40), 90)
 
--- logo
 local logo = new("ImageLabel", {
 	Image = LOGO,
 	ImageColor3 = PINK,
@@ -310,7 +274,6 @@ local logo = new("ImageLabel", {
 	ZIndex = 6,
 }, scene)
 
--- slider
 local slider = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(20, 14, 30),
 	BackgroundTransparency = 0.4,
@@ -329,7 +292,7 @@ local sliderFill = new("Frame", {
 }, slider)
 corner(sliderFill, 26)
 
-local sliderLabel = new("TextLabel", {
+new("TextLabel", {
 	BackgroundTransparency = 1,
 	Size = UDim2.fromScale(1, 1),
 	Font = Enum.Font.GothamBold,
@@ -359,9 +322,7 @@ new("ImageLabel", {
 	ZIndex = 9,
 }, knob)
 
----------------------------------------------------------------------
 -- gate
----------------------------------------------------------------------
 local gate = new("Frame", {
 	Size = UDim2.fromScale(1, 1),
 	BackgroundColor3 = Color3.fromRGB(5, 8, 18),
@@ -410,7 +371,7 @@ stroke(gateInput, PINK, 1, 0.85)
 local dots = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 10), Position = UDim2.fromOffset(0, 118), ZIndex = 22 }, gateCard)
 for i = 1, 5 do
 	local d = new("Frame", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = PINK,
 		BackgroundTransparency = 0.8,
 		Size = UDim2.fromOffset(6, 6),
 		Position = UDim2.new(0.5, -39 + (i - 1) * 16, 0, 0),
@@ -425,17 +386,13 @@ local function refreshDots()
 		local d = dots:FindFirstChild("Dot" .. i)
 		if d then
 			d.BackgroundTransparency = (#gateInput.Text >= i) and 0.1 or 0.8
-			d.BackgroundColor3 = PINK
 		end
 	end
 end
 
----------------------------------------------------------------------
 -- hub
----------------------------------------------------------------------
 local hub = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, ZIndex = 10 }, root)
 
--- dock
 local dock = new("Frame", {
 	BackgroundColor3 = NAVY,
 	BackgroundTransparency = 0.1,
@@ -447,7 +404,11 @@ corner(dock, 12)
 stroke(dock, PINK, 1, 0.85)
 
 local dockRow = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 61 }, dock)
-new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }, dockRow)
+new("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 6),
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+}, dockRow)
 new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, dockRow)
 
 local function dockBtn(glyph, order)
@@ -460,7 +421,7 @@ end
 
 local function dockChip(text, order)
 	local c = new("TextLabel", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.95,
 		Size = UDim2.fromOffset(52, 22),
 		Font = Enum.Font.Gotham,
@@ -486,7 +447,7 @@ new("UISizeConstraint", {}, dockSpacer)
 local btnPaws = dockBtn("", 6)
 local pawsIcon = new("ImageLabel", {
 	Image = LOGO,
-	ImageColor3 = SUB,
+	ImageColor3 = PINK,
 	BackgroundTransparency = 1,
 	Size = UDim2.fromOffset(15, 15),
 	Position = UDim2.fromScale(0.5, 0.5),
@@ -512,9 +473,6 @@ new("ImageLabel", {
 
 local btnMenu = dockBtn("≡", 12)
 
----------------------------------------------------------------------
--- window factory
----------------------------------------------------------------------
 local function makeWindow(name, size, pos, z)
 	local win = new("Frame", {
 		Name = name,
@@ -537,7 +495,11 @@ local function makeWindow(name, size, pos, z)
 	corner(header, 14)
 
 	local headRow = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = z + 2 }, header)
-	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Center }, headRow)
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 6),
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+	}, headRow)
 	new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 8) }, headRow)
 
 	local tag = txt(headRow, "41$", 12, PINK, true)
@@ -548,10 +510,10 @@ local function makeWindow(name, size, pos, z)
 	title.Size = UDim2.fromOffset(150, 20)
 	title.LayoutOrder = 2
 
-	local spacer = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(6, 6), LayoutOrder = 3 }, headRow)
+	new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(6, 6), LayoutOrder = 3 }, headRow)
 
 	local bindChip = new("TextButton", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.94,
 		Size = UDim2.fromOffset(34, 16),
 		Font = Enum.Font.GothamBold,
@@ -562,20 +524,17 @@ local function makeWindow(name, size, pos, z)
 		ZIndex = z + 3,
 	}, headRow)
 	corner(bindChip, 5)
-	stroke(bindChip, Color3.new(1, 1, 1), 1, 0.9)
 
 	local minBtn = roundBtn(headRow, "–", 11)
 	minBtn.Size = UDim2.fromOffset(22, 22)
 	minBtn.LayoutOrder = 5
 	minBtn.ZIndex = z + 3
-	minBtn.BackgroundTransparency = 0.95
 	corner(minBtn, 6)
 
 	local closeBtn = roundBtn(headRow, "×", 11)
 	closeBtn.Size = UDim2.fromOffset(22, 22)
 	closeBtn.LayoutOrder = 6
 	closeBtn.ZIndex = z + 3
-	closeBtn.BackgroundTransparency = 0.95
 	corner(closeBtn, 6)
 
 	local body = new("Frame", {
@@ -585,12 +544,10 @@ local function makeWindow(name, size, pos, z)
 		ZIndex = z + 1,
 	}, win)
 
-	return { win = win, header = header, body = body, min = minBtn, close = closeBtn, title = title, bind = bindChip }
+	return { win = win, header = header, body = body, min = minBtn, close = closeBtn }
 end
 
--- main window
 local mainWin = new("Frame", {
-	Name = "kani - zafi",
 	BackgroundColor3 = NAVY,
 	BackgroundTransparency = 0.04,
 	Size = UDim2.fromOffset(640, 400),
@@ -610,10 +567,14 @@ local mainHeader = new("Frame", {
 corner(mainHeader, 14)
 
 local mainHeadRow = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 32 }, mainHeader)
-new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 7), VerticalAlignment = Enum.VerticalAlignment.Center }, mainHeadRow)
+new("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 7),
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+}, mainHeadRow)
 new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 8) }, mainHeadRow)
 
-local mainLogo = new("ImageLabel", {
+new("ImageLabel", {
 	Image = LOGO,
 	ImageColor3 = PINK,
 	BackgroundTransparency = 1,
@@ -627,7 +588,7 @@ mainTitle.Size = UDim2.fromOffset(200, 20)
 mainTitle.LayoutOrder = 2
 
 local mainEnd = new("TextButton", {
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+	BackgroundColor3 = Color3.new(1, 1, 1),
 	BackgroundTransparency = 0.95,
 	AutoButtonColor = false,
 	Size = UDim2.fromOffset(30, 22),
@@ -644,14 +605,12 @@ local mainMin = roundBtn(mainHeadRow, "–", 11)
 mainMin.Size = UDim2.fromOffset(22, 22)
 mainMin.LayoutOrder = 4
 mainMin.ZIndex = 33
-mainMin.BackgroundTransparency = 0.95
 corner(mainMin, 6)
 
 local mainClose = roundBtn(mainHeadRow, "×", 11)
 mainClose.Size = UDim2.fromOffset(22, 22)
 mainClose.LayoutOrder = 5
 mainClose.ZIndex = 33
-mainClose.BackgroundTransparency = 0.95
 corner(mainClose, 6)
 
 local tabsRow = new("Frame", {
@@ -660,7 +619,11 @@ local tabsRow = new("Frame", {
 	Position = UDim2.fromOffset(0, 40),
 	ZIndex = 32,
 }, mainWin)
-local tabsLayout = new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), VerticalAlignment = Enum.VerticalAlignment.Center }, tabsRow)
+new("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 4),
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+}, tabsRow)
 new("UIPadding", { PaddingLeft = UDim.new(0, 9) }, tabsRow)
 
 local bodyScroll = new("ScrollingFrame", {
@@ -673,17 +636,12 @@ local bodyScroll = new("ScrollingFrame", {
 	ScrollBarImageColor3 = PINK,
 	ZIndex = 32,
 }, mainWin)
-new("UIListLayout", { Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder }, bodyScroll)
 new("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9), PaddingBottom = UDim.new(0, 9) }, bodyScroll)
 
--- anti window
 local anti = makeWindow("ANTI VC BAN", UDim2.fromOffset(404, 366), UDim2.new(1, -418, 0, 78), 40)
 local selfWin = makeWindow("SELF MUTE", UDim2.fromOffset(330, 226), UDim2.fromOffset(22, 150), 44)
 local discord = makeWindow("DISCORD", UDim2.fromOffset(270, 130), UDim2.new(0.5, -135, 0, 170), 50)
 
----------------------------------------------------------------------
--- anti body
----------------------------------------------------------------------
 local function sectionLabel(parent, text, y)
 	local bar = new("Frame", {
 		BackgroundColor3 = PINK,
@@ -696,7 +654,6 @@ local function sectionLabel(parent, text, y)
 	l.Size = UDim2.fromOffset(200, 12)
 	l.Position = UDim2.fromOffset(21, y)
 	l.ZIndex = 42
-	return l
 end
 
 sectionLabel(anti.body, "STATUS", 10)
@@ -733,14 +690,13 @@ local refreshBtn = roundBtn(statusCard, "⟳", 11)
 refreshBtn.Size = UDim2.fromOffset(20, 20)
 refreshBtn.Position = UDim2.new(1, -30, 0, 17)
 refreshBtn.ZIndex = 43
-refreshBtn.BackgroundTransparency = 0.94
 
 sectionLabel(anti.body, "METHOD", 92)
 
 local methods = {}
-local function makeMethod(y, name, badgeText, badgeColor, tint, desc, order)
+local function makeMethod(y, name, badgeText, badgeColor, tint, desc)
 	local row = new("Frame", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.98,
 		Size = UDim2.new(1, -24, 0, 62),
 		Position = UDim2.fromOffset(12, y),
@@ -749,14 +705,11 @@ local function makeMethod(y, name, badgeText, badgeColor, tint, desc, order)
 	corner(row, 10)
 	stroke(row, Color3.new(1, 1, 1), 1, 0.93)
 
-	local bar = new("Frame", {
-		BackgroundColor3 = tint,
-		Size = UDim2.fromOffset(3, 62),
-		ZIndex = 43,
-	}, row)
+	new("Frame", { BackgroundColor3 = tint, Size = UDim2.fromOffset(3, 62), ZIndex = 43 }, row)
 
 	local radio = new("Frame", {
 		BackgroundColor3 = Color3.fromRGB(12, 10, 18),
+		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(13, 13),
 		Position = UDim2.fromOffset(11, 12),
 		ZIndex = 43,
@@ -765,14 +718,14 @@ local function makeMethod(y, name, badgeText, badgeColor, tint, desc, order)
 	stroke(radio, Color3.fromRGB(85, 72, 90), 2, 0)
 
 	local t = txt(row, name, 10, TEXT, true)
-	t.Size = UDim2.fromOffset(150, 14)
+	t.Size = UDim2.fromOffset(160, 14)
 	t.Position = UDim2.fromOffset(32, 8)
 	t.ZIndex = 43
 
 	local badge = new("TextLabel", {
 		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(80, 10),
-		Position = UDim2.fromOffset(32 + math.min(#name * 6, 130), 10),
+		Size = UDim2.fromOffset(90, 10),
+		Position = UDim2.fromOffset(34 + math.min(#name * 5.6, 132), 10),
 		Font = Enum.Font.GothamBold,
 		Text = badgeText,
 		TextSize = 7,
@@ -801,7 +754,7 @@ local function makeMethod(y, name, badgeText, badgeColor, tint, desc, order)
 	corner(sel, 8)
 	stroke(sel, tint, 1, 0.7)
 
-	local entry = { row = row, radio = radio, sel = sel, tint = tint, name = name }
+	local entry = { row = row, radio = radio, sel = sel, name = name }
 	table.insert(methods, entry)
 	return entry
 end
@@ -810,10 +763,7 @@ makeMethod(114, "Legacy Anti VC Ban", "RECOMMENDED", PINK, PINK, "This is the ne
 makeMethod(182, "Original Anti VC", "DEFAULT", LAV, LAV, "The original Anti VC Ban. For lower-end devices; less demanding.")
 makeMethod(250, "Revised Anti VC Ban", "EXPERIMENTAL", PEACH, PEACH, "Uses Roblox's voice chat muting. Least demanding, yet buggy.")
 
----------------------------------------------------------------------
--- self mute body
----------------------------------------------------------------------
-local micIcon = new("ImageLabel", {
+new("ImageLabel", {
 	Image = LOGO,
 	ImageColor3 = PINK,
 	BackgroundTransparency = 1,
@@ -839,7 +789,7 @@ keyLabel.Position = UDim2.fromOffset(12, 36)
 keyLabel.ZIndex = 46
 
 local keyChip = new("TextButton", {
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+	BackgroundColor3 = Color3.new(1, 1, 1),
 	BackgroundTransparency = 0.94,
 	AutoButtonColor = false,
 	Size = UDim2.fromOffset(30, 20),
@@ -857,13 +807,13 @@ keyClear.Size = UDim2.fromOffset(18, 18)
 keyClear.Position = UDim2.new(1, -24, 0, 35)
 keyClear.ZIndex = 46
 
-local function toggleRow(y, text, store)
+local function toggleRow(y, text)
 	local row = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -24, 0, 30), Position = UDim2.fromOffset(12, y), ZIndex = 46 }, selfWin.body)
 	local l = txt(row, text, 10, TEXT)
 	l.Size = UDim2.new(1, -40, 0, 30)
 	l.ZIndex = 46
 	local sw = new("TextButton", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.85,
 		AutoButtonColor = false,
 		Size = UDim2.fromOffset(30, 16),
@@ -872,16 +822,15 @@ local function toggleRow(y, text, store)
 		ZIndex = 46,
 	}, row)
 	corner(sw, 9)
-	local knobDot = new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(2, 2), ZIndex = 47 }, sw)
-	corner(knobDot, 6)
+	local dot2 = new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(2, 2), ZIndex = 47 }, sw)
+	corner(dot2, 6)
 	local on = false
 	sw.MouseButton1Click:Connect(function()
 		on = not on
 		sw.BackgroundTransparency = on and 0.1 or 0.85
 		sw.BackgroundColor3 = on and PINK_DEEP or Color3.new(1, 1, 1)
-		TweenService:Create(knobDot, TweenInfo.new(0.15), { Position = UDim2.fromOffset(on and 16 or 2, 2) }):Play()
+		TweenService:Create(dot2, TweenInfo.new(0.15), { Position = UDim2.fromOffset(on and 16 or 2, 2) }):Play()
 	end)
-	return sw
 end
 
 toggleRow(64, "push to talk (hold to unmute)")
@@ -894,13 +843,20 @@ foot.TextWrapped = true
 foot.TextYAlignment = Enum.TextYAlignment.Top
 foot.ZIndex = 46
 
--- discord body
-local discordRow = new("Frame", { BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.96, Size = UDim2.new(1, -20, 0, 40), Position = UDim2.fromOffset(10, 10), ZIndex = 52 }, discord.body)
+local discordRow = new("Frame", {
+	BackgroundColor3 = Color3.new(1, 1, 1),
+	BackgroundTransparency = 0.96,
+	Size = UDim2.new(1, -20, 0, 40),
+	Position = UDim2.fromOffset(10, 10),
+	ZIndex = 52,
+}, discord.body)
 corner(discordRow, 8)
+
 local discordText = txt(discordRow, "discord.gg/hadis", 10, TEXT, true)
 discordText.Size = UDim2.new(1, -20, 0, 16)
 discordText.Position = UDim2.fromOffset(10, 6)
 discordText.ZIndex = 53
+
 local discordSub = txt(discordRow, "updates, keys, support", 8, SUB)
 discordSub.Size = UDim2.new(1, -20, 0, 14)
 discordSub.Position = UDim2.fromOffset(10, 22)
@@ -913,9 +869,6 @@ copyDisc.ZIndex = 52
 corner(copyDisc, 7)
 stroke(copyDisc, PINK, 1, 0.75)
 
----------------------------------------------------------------------
--- bubble
----------------------------------------------------------------------
 local bubble = new("TextButton", {
 	BackgroundColor3 = NAVY,
 	BackgroundTransparency = 0.06,
@@ -927,15 +880,20 @@ local bubble = new("TextButton", {
 }, hub)
 corner(bubble, 26)
 stroke(bubble, PINK, 1, 0.6)
-new("ImageLabel", { Image = LOGO, ImageColor3 = PINK, BackgroundTransparency = 1, Size = UDim2.fromOffset(26, 26), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 71 }, bubble)
+new("ImageLabel", {
+	Image = LOGO,
+	ImageColor3 = PINK,
+	BackgroundTransparency = 1,
+	Size = UDim2.fromOffset(26, 26),
+	Position = UDim2.fromScale(0.5, 0.5),
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	ZIndex = 71,
+}, bubble)
 
----------------------------------------------------------------------
--- drawer
----------------------------------------------------------------------
 local drawer = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(10, 15, 30),
 	BackgroundTransparency = 0.02,
-	Size = UDim2.fromOffset(230, 1),
+	Size = UDim2.new(0, 230, 1, 0),
 	Position = UDim2.new(1, 230, 0, 0),
 	ZIndex = 80,
 }, hub)
@@ -945,9 +903,9 @@ new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14)
 local drawerTitle = txt(drawer, "SETTINGS", 10, PINK, true)
 drawerTitle.Size = UDim2.new(1, 0, 0, 14)
 
-local function drawerRow(text, callback)
+local function drawerRow(text)
 	local row = new("TextButton", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.96,
 		AutoButtonColor = false,
 		Size = UDim2.new(1, 0, 0, 30),
@@ -959,28 +917,18 @@ local function drawerRow(text, callback)
 	l.Size = UDim2.new(1, -12, 0, 30)
 	l.Position = UDim2.fromOffset(8, 0)
 	l.ZIndex = 82
-	row.MouseButton1Click:Connect(callback)
 	return row
 end
 
-local drawerBack = drawerRow("back to intro", function() end)
-local drawerClose = drawerRow("close", function() end)
+local drawerBack = drawerRow("back to intro")
+local drawerClose = drawerRow("close")
 
 local function toggleDrawer(open)
 	TweenService:Create(drawer, TweenInfo.new(0.25), {
 		Position = open and UDim2.new(1, -230, 0, 0) or UDim2.new(1, 0, 0, 0),
-		Size = UDim2.new(0, 230, 1, 0),
 	}):Play()
-	if open then
-		drawer.Size = UDim2.new(0, 230, 1, 0)
-		drawer.Position = UDim2.new(1, 230, 0, 0)
-		TweenService:Create(drawer, TweenInfo.new(0.25), { Position = UDim2.new(1, -230, 0, 0) }):Play()
-	end
 end
 
----------------------------------------------------------------------
--- search overlay
----------------------------------------------------------------------
 local overlay = new("Frame", {
 	BackgroundColor3 = Color3.fromRGB(5, 8, 18),
 	BackgroundTransparency = 0.25,
@@ -1022,12 +970,8 @@ local searchResults = new("ScrollingFrame", {
 	ScrollBarThickness = 3,
 	ZIndex = 87,
 }, searchBox)
-new("UIListLayout", { Padding = UDim.new(0, 3) }, searchResults)
 new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, searchResults)
 
----------------------------------------------------------------------
--- data + rendering
----------------------------------------------------------------------
 local DATA = {
 	all = {},
 	main = {
@@ -1085,32 +1029,11 @@ local function renderTabs()
 	end
 end
 
-local function setTab(tab)
-	currentTab = tab
-	renderTabs()
-end
-
 local exec
-
-local function bindChipFor(card)
-	local chip = new("TextButton", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-		BackgroundTransparency = 0.94,
-		AutoButtonColor = false,
-		Size = UDim2.fromOffset(38, 16),
-		Font = Enum.Font.GothamBold,
-		Text = binds[card.n] and binds[card.n].Name or "bind",
-		TextSize = 8,
-		TextColor3 = binds[card.n] and PINK or SUB,
-		ZIndex = 34,
-	}, nil)
-	corner(chip, 5)
-	return chip
-end
 
 local function render()
 	bodyScroll:ClearAllChildren()
-	new("UIListLayout", { Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder }, bodyScroll)
+	new("UIListLayout", { Padding = UDim.new(0, 7) }, bodyScroll)
 	new("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9), PaddingBottom = UDim.new(0, 9) }, bodyScroll)
 
 	local order = 0
@@ -1118,7 +1041,7 @@ local function render()
 		order += 1
 
 		local row = new("Frame", {
-			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundColor3 = Color3.new(1, 1, 1),
 			BackgroundTransparency = 0.96,
 			Size = UDim2.new(1, -18, 0, card.k == "auto" and 96 or 52),
 			LayoutOrder = order,
@@ -1127,7 +1050,12 @@ local function render()
 		corner(row, 10)
 		stroke(row, Color3.new(1, 1, 1), 1, 0.94)
 
-		local dot = new("Frame", { BackgroundColor3 = PINK, Size = UDim2.fromOffset(5, 5), Position = UDim2.fromOffset(9, 11), ZIndex = 34 }, row)
+		local dot = new("Frame", {
+			BackgroundColor3 = PINK,
+			Size = UDim2.fromOffset(5, 5),
+			Position = UDim2.fromOffset(9, 11),
+			ZIndex = 34,
+		}, row)
 		corner(dot, 3)
 
 		local name = txt(row, card.n, 11, TEXT, true)
@@ -1135,9 +1063,20 @@ local function render()
 		name.Position = UDim2.fromOffset(20, 6)
 		name.ZIndex = 34
 
-		local chip = bindChipFor(card)
-		chip.Position = UDim2.new(1, -72, 0, 6)
-		chip.Parent = row
+		local chip = new("TextButton", {
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			BackgroundTransparency = 0.94,
+			AutoButtonColor = false,
+			Size = UDim2.fromOffset(38, 16),
+			Position = UDim2.new(1, -72, 0, 6),
+			Font = Enum.Font.GothamBold,
+			Text = binds[card.n] and binds[card.n].Name or "bind",
+			TextSize = 8,
+			TextColor3 = binds[card.n] and PINK or SUB,
+			ZIndex = 34,
+		}, row)
+		corner(chip, 5)
+
 		chip.MouseButton1Click:Connect(function()
 			listening = card.n
 			chip.Text = "press key"
@@ -1147,7 +1086,7 @@ local function render()
 		end)
 
 		local switch = new("TextButton", {
-			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundColor3 = (card.k == "auto" and autoOn) and PINK_DEEP or Color3.new(1, 1, 1),
 			BackgroundTransparency = (card.k == "auto" and autoOn) and 0.1 or 0.85,
 			AutoButtonColor = false,
 			Size = UDim2.fromOffset(30, 16),
@@ -1157,7 +1096,12 @@ local function render()
 		}, row)
 		corner(switch, 9)
 
-		local swDot = new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset((card.k == "auto" and autoOn) and 16 or 2, 2), ZIndex = 35 }, switch)
+		local swDot = new("Frame", {
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			Size = UDim2.fromOffset(12, 12),
+			Position = UDim2.fromOffset((card.k == "auto" and autoOn) and 16 or 2, 2),
+			ZIndex = 35,
+		}, switch)
 		corner(swDot, 6)
 
 		switch.MouseButton1Click:Connect(function()
@@ -1221,7 +1165,7 @@ end
 
 for _, tab in ipairs(TABS) do
 	local b = new("TextButton", {
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.97,
 		AutoButtonColor = false,
 		Size = UDim2.fromOffset(52, 22),
@@ -1233,19 +1177,19 @@ for _, tab in ipairs(TABS) do
 	}, tabsRow)
 	corner(b, 7)
 	tabButtons[tab] = b
-	b.MouseButton1Click:Connect(function() setTab(tab) end)
+	b.MouseButton1Click:Connect(function()
+		currentTab = tab
+		renderTabs()
+		render()
+	end)
 end
 
----------------------------------------------------------------------
--- anti logic
----------------------------------------------------------------------
 local activeMethod = methods[1]
 
 local function paintMethods()
 	for _, m in ipairs(methods) do
 		local isOn = (m == activeMethod)
 		m.row.BackgroundTransparency = isOn and 0.94 or 0.98
-		m.radio.BackgroundColor3 = isOn and PINK or Color3.fromRGB(12, 10, 18)
 		m.radio.BackgroundTransparency = isOn and 0 or 1
 		m.sel.Text = isOn and "ACTIVE" or "SELECT"
 	end
@@ -1256,8 +1200,8 @@ local function injectAnti()
 	injecting = true
 	anti.win.Visible = true
 	anti.win.Size = UDim2.fromOffset(404, 366)
+	anti.body.Visible = true
 	statusLabel.Text = "INJECTING"
-	statusLabel.TextColor3 = PINK
 	statusSub.Text = "Injecting " .. activeMethod.name .. " method..."
 	statusDot.BackgroundTransparency = 0.3
 
@@ -1268,6 +1212,7 @@ local function injectAnti()
 	statusDot.BackgroundTransparency = 0
 	selfWin.win.Visible = true
 	selfWin.win.Size = UDim2.fromOffset(330, 226)
+	selfWin.body.Visible = true
 	notify("anti vc ban injected")
 	injecting = false
 end
@@ -1293,9 +1238,6 @@ exec = function(name, kind)
 	notify("executed • " .. name)
 end
 
----------------------------------------------------------------------
--- binds
----------------------------------------------------------------------
 UIS.InputBegan:Connect(function(input, processed)
 	if processed then return end
 
@@ -1329,9 +1271,6 @@ UIS.InputBegan:Connect(function(input, processed)
 	end
 end)
 
----------------------------------------------------------------------
--- gate + slider
----------------------------------------------------------------------
 local sliderPos = 0
 local sliderDragging = false
 local SLIDER_MAX = 316 - 40 - 12
@@ -1345,10 +1284,8 @@ end
 
 local function unlock()
 	gate.Visible = false
-	scene.Visible = true
 	hub.Visible = true
 	mainWin.Visible = true
-	unlocked = true
 	render()
 	notify("welcome, kani")
 end
@@ -1393,9 +1330,6 @@ UIS.InputEnded:Connect(function(input)
 	end
 end)
 
----------------------------------------------------------------------
--- dragging
----------------------------------------------------------------------
 local function makeDraggable(frame, handle)
 	local dragging = false
 	local startPos, startInput
@@ -1433,31 +1367,24 @@ makeDraggable(selfWin.win, selfWin.header)
 makeDraggable(discord.win, discord.header)
 makeDraggable(bubble, bubble)
 
----------------------------------------------------------------------
--- minimize / close
----------------------------------------------------------------------
-local function collapse(win, body, minButton)
+local function collapse(win, body, minButton, fullSize, miniHeight)
 	local isMini = win:GetAttribute("Mini")
 	isMini = not isMini
 	win:SetAttribute("Mini", isMini)
 	body.Visible = not isMini
 	minButton.Text = isMini and "+" or "–"
-	if win == anti.win then
-		win.Size = isMini and UDim2.fromOffset(404, 38) or UDim2.fromOffset(404, 366)
-	elseif win == selfWin.win then
-		win.Size = isMini and UDim2.fromOffset(330, 38) or UDim2.fromOffset(330, 226)
-	elseif win == discord.win then
-		win.Size = isMini and UDim2.fromOffset(270, 38) or UDim2.fromOffset(270, 130)
-	elseif win == mainWin then
-		win.Size = isMini and UDim2.fromOffset(640, 40) or UDim2.fromOffset(640, 400)
-		tabsRow.Visible = not isMini
-		bodyScroll.Visible = not isMini
-	end
+	win.Size = isMini and UDim2.fromOffset(fullSize.X.Offset, miniHeight or 38) or fullSize
 end
 
-anti.min.MouseButton1Click:Connect(function() collapse(anti.win, anti.body, anti.min) end)
-selfWin.min.MouseButton1Click:Connect(function() collapse(selfWin.win, selfWin.body, selfWin.min) end)
-discord.min.MouseButton1Click:Connect(function() collapse(discord.win, discord.body, discord.min) end)
+anti.min.MouseButton1Click:Connect(function()
+	collapse(anti.win, anti.body, anti.min, UDim2.fromOffset(404, 366))
+end)
+selfWin.min.MouseButton1Click:Connect(function()
+	collapse(selfWin.win, selfWin.body, selfWin.min, UDim2.fromOffset(330, 226))
+end)
+discord.min.MouseButton1Click:Connect(function()
+	collapse(discord.win, discord.body, discord.min, UDim2.fromOffset(270, 130))
+end)
 
 anti.close.MouseButton1Click:Connect(function() anti.win.Visible = false end)
 selfWin.close.MouseButton1Click:Connect(function() selfWin.win.Visible = false end)
@@ -1469,7 +1396,8 @@ mainMin.MouseButton1Click:Connect(function()
 		dock.Visible = false
 		bubble.Visible = true
 	else
-		collapse(mainWin, bodyScroll, mainMin)
+		collapse(mainWin, bodyScroll, mainMin, UDim2.fromOffset(640, 400), 40)
+		tabsRow.Visible = false
 	end
 end)
 
@@ -1484,24 +1412,19 @@ bubble.MouseButton1Click:Connect(function()
 	dock.Visible = true
 end)
 
----------------------------------------------------------------------
--- back to intro
----------------------------------------------------------------------
 local function backToIntro()
-	for _, win in ipairs({ anti.win, selfWin.win, discord.win }) do
-		win.Visible = false
-		win:SetAttribute("Mini", false)
-		win.Size = UDim2.fromOffset(win == anti.win and 404 or (win == selfWin.win and 330 or 270), 38)
-	end
+	anti.win.Visible = false
+	selfWin.win.Visible = false
+	discord.win.Visible = false
 	anti.win.Size = UDim2.fromOffset(404, 366)
 	selfWin.win.Size = UDim2.fromOffset(330, 226)
 	discord.win.Size = UDim2.fromOffset(270, 130)
-	anti.min.Text = "–"
-	selfWin.min.Text = "–"
-	discord.min.Text = "–"
 	anti.body.Visible = true
 	selfWin.body.Visible = true
 	discord.body.Visible = true
+	anti.min.Text = "–"
+	selfWin.min.Text = "–"
+	discord.min.Text = "–"
 
 	overlay.Visible = false
 	toggleDrawer(false)
@@ -1528,9 +1451,6 @@ mainClose.MouseButton1Click:Connect(backToIntro)
 drawerBack.MouseButton1Click:Connect(backToIntro)
 drawerClose.MouseButton1Click:Connect(function() toggleDrawer(false) end)
 
----------------------------------------------------------------------
--- dock actions
----------------------------------------------------------------------
 local dockFolded = false
 btnDrop.MouseButton1Click:Connect(function()
 	dockFolded = not dockFolded
@@ -1560,13 +1480,15 @@ local function setMode(m)
 	end
 end
 setMode("night")
-btnMode.MouseButton1Click:Connect(function() setMode(mode == "night" and "day" or "night") end)
+btnMode.MouseButton1Click:Connect(function()
+	setMode(mode == "night" and "day" or "night")
+end)
 
 local function setPaws(on)
 	pawsOn = on
 	pawsIcon.ImageColor3 = on and PINK or SUB
-	btnPaws.BackgroundColor3 = on and PINK or Color3.fromRGB(255, 255, 255)
 	btnPaws.BackgroundTransparency = on and 0.1 or 0.95
+	btnPaws.BackgroundColor3 = on and PINK or Color3.new(1, 1, 1)
 	notify(on and "paws on" or "paws off")
 end
 setPaws(true)
@@ -1590,7 +1512,7 @@ local function runSearch(query)
 		if not seen[card.n] and (query == "" or card.n:lower():find(query:lower(), 1, true)) then
 			seen[card.n] = true
 			local item = new("TextButton", {
-				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+				BackgroundColor3 = Color3.new(1, 1, 1),
 				BackgroundTransparency = 0.96,
 				AutoButtonColor = false,
 				Size = UDim2.new(1, -12, 0, 26),
@@ -1627,9 +1549,6 @@ overlay.InputBegan:Connect(function(input)
 	end
 end)
 
----------------------------------------------------------------------
--- self mute + discord
----------------------------------------------------------------------
 keyChip.MouseButton1Click:Connect(function()
 	keyChip.Text = "key"
 	local conn
@@ -1648,28 +1567,23 @@ copyDisc.MouseButton1Click:Connect(function()
 	notify("invite copied")
 end)
 
----------------------------------------------------------------------
--- paws (falling)
----------------------------------------------------------------------
 local pawFolder = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 8 }, scene)
 
 task.spawn(function()
 	while true do
 		task.wait(0.45)
 		if pawsOn then
+			local size = math.random(11, 22)
 			local p = new("ImageLabel", {
 				Image = LOGO,
 				ImageColor3 = PINK,
 				ImageTransparency = 0.35,
 				BackgroundTransparency = 1,
-				Size = UDim2.fromOffset(math.random(11, 22), math.random(11, 22)),
+				Size = UDim2.fromOffset(size, size),
 				Position = UDim2.fromScale(math.random(), -0.05),
 				Rotation = math.random(0, 360),
 				ZIndex = 8,
 			}, pawFolder)
-
-			local size = p.AbsoluteSize.X
-			p.Size = UDim2.fromOffset(size, size)
 
 			local duration = math.random(70, 130) / 10
 			local target = math.random(110, 150) / 100
@@ -1686,9 +1600,6 @@ task.spawn(function()
 	end
 end)
 
----------------------------------------------------------------------
--- start
----------------------------------------------------------------------
 render()
 task.delay(0.2, function()
 	notify("slide to continue")
