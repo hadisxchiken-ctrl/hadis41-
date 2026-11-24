@@ -3,10 +3,10 @@
 	passkey: hadis
 
 	Executor:
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/hadischxken-ctrl/hadis41-/main/hadis.lua"))()
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/hadisxchiken-ctrl/hadis41-/main/hadis.lua"))()
 ]]
 
-local LOADER_URL = "https://raw.githubusercontent.com/hadischxken-ctrl/hadis41-/main/hadis.lua"
+local LOADER_URL = "https://raw.githubusercontent.com/hadisxchiken-ctrl/hadis41-/main/hadis.lua"
 local PASSKEY = "hadis"
 
 local Players = game:GetService("Players")
