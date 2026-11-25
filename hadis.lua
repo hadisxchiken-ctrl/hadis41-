@@ -1,6 +1,7 @@
 --=====================================================================
---  ANTI VC BAN  v3.2  |  PC build  |  by hadis
+--  ANTI VC BAN  v3.3  |  PC build  |  by hadis
 --  Hotkeys: V mute · F1 legacy · F2 modern · F3 stop · F4 hide · F5 unload
+--  Join chain: JoinVoice -> JoinVoiceChannel -> VoiceChatInternal
 --  Best on: Velocity / Madium / Wave / Potassium
 --  Does NOT work on: Zeno, Xeno, Solara, Volt
 --=====================================================================
@@ -13,17 +14,19 @@ local VCS      = game:GetService("VoiceChatService")
 local UIS      = game:GetService("UserInputService")
 local HS       = game:GetService("HttpService")
 local SG       = game:GetService("StarterGui")
+local CoreGui  = game:GetService("CoreGui")
 local LP       = Players.LocalPlayer
 local VCI
 pcall(function() VCI = game:GetService("VoiceChatInternal") end)
 
-local VERSION  = "3.2"
+local VERSION  = "3.3"
 local CFG_PATH = "avcb_config.json"
 
 local State = {
-    mode = "legacy", autoStart = false, notifyOn = true, interval = 0.75,
-    running = false, muted = false, joins = 0, startedAt = nil,
+    mode = "legacy", autoStart = false, notifyOn = true, hideUi = true,
+    interval = 0.75, running = false, muted = false, joins = 0, startedAt = nil,
 }
+local lastJoin = "-"
 
 local Binds = {
     mute = Enum.KeyCode.V,
@@ -34,10 +37,7 @@ local Binds = {
     unload = Enum.KeyCode.F5,
 }
 
-local thread
-local capturing
-local reopen
-local hideWin
+local thread, capturing, reopen, hideWin
 
 ------------------------------------------------------------------ utils
 local function new(class, props, parent)
@@ -60,7 +60,7 @@ local function saveCfg()
     for a, k in pairs(Binds) do keys[a] = k.Name end
     pcall(function()
         writefile(CFG_PATH, HS:JSONEncode({
-            binds = keys, autoStart = State.autoStart,
+            binds = keys, autoStart = State.autoStart, hideUi = State.hideUi,
             notifyOn = State.notifyOn, interval = State.interval,
         }))
     end)
@@ -76,18 +76,65 @@ local function loadCfg()
         end
     end
     if type(data.autoStart) == "boolean" then State.autoStart = data.autoStart end
+    if type(data.hideUi) == "boolean" then State.hideUi = data.hideUi end
     if type(data.notifyOn) == "boolean" then State.notifyOn = data.notifyOn end
     if tonumber(data.interval) then State.interval = math.clamp(tonumber(data.interval), 0.25, 5) end
 end
 loadCfg()
 
+------------------------------------------------------------------ stock VC ui hiding
+local hiddenVc = {}
+
+local function hideVcUi()
+    local rg = CoreGui:FindFirstChild("RobloxGui")
+    if not rg then return false end
+    local bar = rg:FindFirstChild("TopBar") or rg
+    local found = false
+    local ok = pcall(function()
+        for _, d in ipairs(bar:GetDescendants()) do
+            if d:IsA("GuiObject") and d.Visible then
+                local n = d.Name
+                if n:find("Voice") or n:find("Mic") or n:find("Vc") or n:find("VCS") then
+                    hiddenVc[d] = true
+                    d.Visible = false
+                    found = true
+                end
+            end
+        end
+    end)
+    return ok and found
+end
+
+local function showVcUi()
+    for obj in pairs(hiddenVc) do
+        pcall(function() if obj.Parent then obj.Visible = true end end)
+    end
+    hiddenVc = {}
+end
+
 ------------------------------------------------------------------ engine
 local function joinOnce()
-    if pcall(function() VCS:JoinVoice() end) then State.joins = State.joins + 1 end
+    local ok, err = false, nil
+    if typeof(VCS.JoinVoice) == "function" then
+        ok, err = pcall(VCS.JoinVoice, VCS)
+    end
+    if not ok and typeof(VCS.JoinVoiceChannel) == "function" then
+        ok, err = pcall(VCS.JoinVoiceChannel, VCS)
+    end
+    if not ok and VCI and typeof(VCI.JoinVoice) == "function" then
+        ok, err = pcall(VCI.JoinVoice, VCI)
+    end
+    if not ok and typeof(VCS.GetVoiceChatId) == "function" then
+        local cid = select(2, pcall(VCS.GetVoiceChatId, VCS))
+        if cid then ok, err = pcall(VCS.JoinVoiceChannel, VCS, cid) end
+    end
+    lastJoin = ok and "ok" or tostring(err)
+    if ok then State.joins = State.joins + 1 end
+    return ok
 end
 
 local function isJoined()
-    if not VCI or not VCI.GetVoiceChatState then return nil end
+    if not VCI or typeof(VCI.GetVoiceChatState) ~= "function" then return nil end
     local ok, st = pcall(VCI.GetVoiceChatState, VCI)
     if not ok then return nil end
     local n = tostring(st)
@@ -97,7 +144,9 @@ end
 local function setMute(s)
     State.muted = s
     local ok = false
-    if VCI and VCI.SetMicrophoneMute then ok = pcall(VCI.SetMicrophoneMute, VCI, s) end
+    if VCI and typeof(VCI.SetMicrophoneMute) == "function" then
+        ok = pcall(VCI.SetMicrophoneMute, VCI, s)
+    end
     if not ok then pcall(function() VCS:SetMicrophoneMute(s) end) end
     if not ok then joinOnce() end
 end
@@ -106,11 +155,21 @@ local function stopLoop()
     State.running = false
     State.startedAt = nil
     if thread then pcall(task.cancel, thread) thread = nil end
+    if State.hideUi then showVcUi() end
 end
 
 local function startLoop(m)
     stopLoop()
     State.mode, State.running, State.startedAt = m, true, os.clock()
+    if m == "legacy" and State.hideUi then
+        task.spawn(function()
+            for _ = 1, 12 do
+                if not State.running then return end
+                hideVcUi()
+                task.wait(0.5)
+            end
+        end)
+    end
     thread = task.spawn(function()
         while State.running do
             if State.mode == "legacy" then
@@ -127,7 +186,7 @@ end
 
 ------------------------------------------------------------------ window
 local gui = new("ScreenGui", { Name = "AVCB", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
-pcall(function() gui.Parent = game:GetService("CoreGui") end)
+pcall(function() gui.Parent = CoreGui end)
 if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
 
 local win = new("Frame", {
@@ -279,7 +338,7 @@ new("UICorner", { CornerRadius = UDim.new(0, 6) }, stateBox)
 new("TextLabel", { Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(10, 5), BackgroundTransparency = 1, Text = "STATE", TextColor3 = Color3.fromRGB(110, 110, 122), Font = Enum.Font.GothamBold, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
 local stateLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 16), Position = UDim2.fromOffset(10, 18), BackgroundTransparency = 1, Text = "idle · mic live", TextColor3 = Color3.fromRGB(200, 200, 210), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
 
-label(mainP, "Legacy kills the stock VC UI on purpose. Mute is a hotkey, not a button.", 160, Color3.fromRGB(110, 110, 122), 10)
+label(mainP, "Legacy hides the stock VC UI on purpose. Mute is a hotkey, not a button.", 160, Color3.fromRGB(110, 110, 122), 10)
 
 ------------------------------------------------------------------ HOTKEYS
 local hkP = pages.Hotkeys
@@ -311,26 +370,31 @@ bindRow("unload", "Unload", 150)
 local setP = pages.Settings
 toggleRow(setP, "Auto-start on execute", 0, function() return State.autoStart end, function(v) State.autoStart = v saveCfg() end)
 toggleRow(setP, "Notifications", 34, function() return State.notifyOn end, function(v) State.notifyOn = v saveCfg() end)
+toggleRow(setP, "Hide stock VC UI (legacy)", 68, function() return State.hideUi end, function(v)
+    State.hideUi = v
+    if v and State.running then hideVcUi() elseif not v then showVcUi() end
+    saveCfg()
+end)
 
-local intervalLabel = label(setP, "", 70, Color3.fromRGB(200, 200, 210), 11)
+local intervalLabel = label(setP, "", 104, Color3.fromRGB(200, 200, 210), 11)
 local function renderInterval() intervalLabel.Text = string.format("Rejoin interval:  %.2fs", State.interval) end
 renderInterval()
 
-local minusBtn = actionBtn(setP, "-", 88, Color3.fromRGB(34, 34, 42), 26, function()
+local minusBtn = actionBtn(setP, "-", 122, Color3.fromRGB(34, 34, 42), 26, function()
     State.interval = math.clamp(State.interval - 0.25, 0.25, 5) renderInterval() saveCfg()
 end)
 minusBtn.Size = UDim2.new(0.48, 0, 0, 26)
 minusBtn.TextXAlignment = Enum.TextXAlignment.Center
 
-local plusBtn = actionBtn(setP, "+", 88, Color3.fromRGB(34, 34, 42), 26, function()
+local plusBtn = actionBtn(setP, "+", 122, Color3.fromRGB(34, 34, 42), 26, function()
     State.interval = math.clamp(State.interval + 0.25, 0.25, 5) renderInterval() saveCfg()
 end)
 plusBtn.Size = UDim2.new(0.48, 0, 0, 26)
-plusBtn.Position = UDim2.new(0.52, 0, 0, 88)
+plusBtn.Position = UDim2.new(0.52, 0, 0, 122)
 plusBtn.TextXAlignment = Enum.TextXAlignment.Center
 
-actionBtn(setP, "Reset all settings", 122, Color3.fromRGB(60, 40, 40), 26, function()
-    State.autoStart, State.notifyOn, State.interval = false, true, 0.75
+actionBtn(setP, "Reset all settings", 156, Color3.fromRGB(60, 40, 40), 26, function()
+    State.autoStart, State.notifyOn, State.hideUi, State.interval = false, true, true, 0.75
     for a, k in pairs({ mute = "V", legacy = "F1", modern = "F2", stop = "F3", hide = "F4", unload = "F5" }) do
         Binds[a] = Enum.KeyCode[k]
         if bindBtns[a] then bindBtns[a].Text = k end
@@ -342,12 +406,15 @@ end)
 local infoP = pages.Info
 local rows = {
     { "Status", "idle" }, { "Method", "-" }, { "VC state", "nil" },
-    { "Mic", "live" }, { "Joins sent", "0" }, { "Uptime", "-" },
+    { "Mic", "live" }, { "Joins sent", "0" }, { "Last join", "-" },
+    { "Uptime", "-" }, { "JoinVoice", typeof(VCS.JoinVoice) },
+    { "JoinVoiceChannel", typeof(VCS.JoinVoiceChannel) },
+    { "VoiceChatInternal", VCI and "present" or "missing" },
     { "Executor mute API", (VCI and VCI.SetMicrophoneMute) and "yes" or "fallback" },
 }
 local infoLbls = {}
 for i, r in ipairs(rows) do
-    local l = label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 18, Color3.fromRGB(190, 190, 200), 11)
+    local l = label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 15, Color3.fromRGB(190, 190, 200), 10)
     infoLbls[r[1]] = l
 end
 
@@ -381,6 +448,7 @@ task.spawn(function()
         infoLbls["VC state"].Text = "VC state:  " .. tostring(isJoined())
         infoLbls["Mic"].Text = "Mic:  " .. (State.muted and "muted" or "live")
         infoLbls["Joins sent"].Text = "Joins sent:  " .. State.joins
+        infoLbls["Last join"].Text = "Last join:  " .. lastJoin
         infoLbls["Uptime"].Text = "Uptime:  " .. (State.startedAt and string.format("%.0fs", os.clock() - State.startedAt) or "-")
         task.wait(0.4)
     end
