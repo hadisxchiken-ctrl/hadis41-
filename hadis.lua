@@ -1,7 +1,7 @@
 --=====================================================================
---  ANTI VC BAN  v3.1  |  PC build  |  by hadis
+--  ANTI VC BAN  v3.2  |  PC build  |  by hadis
 --  Hotkeys: V mute · F1 legacy · F2 modern · F3 stop · F4 hide · F5 unload
---  Best on: Potassium / Velocity / Wave / Madium
+--  Best on: Velocity / Madium / Wave / Potassium
 --  Does NOT work on: Zeno, Xeno, Solara, Volt
 --=====================================================================
 
@@ -17,7 +17,7 @@ local LP       = Players.LocalPlayer
 local VCI
 pcall(function() VCI = game:GetService("VoiceChatInternal") end)
 
-local VERSION  = "3.1"
+local VERSION  = "3.2"
 local CFG_PATH = "avcb_config.json"
 
 local State = {
@@ -33,7 +33,11 @@ local Binds = {
     hide = Enum.KeyCode.F4,
     unload = Enum.KeyCode.F5,
 }
+
 local thread
+local capturing
+local reopen
+local hideWin
 
 ------------------------------------------------------------------ utils
 local function new(class, props, parent)
@@ -382,16 +386,13 @@ task.spawn(function()
     end
 end)
 
------------------------------------------------------------------- input
-local capturing
-local reopen
-
+------------------------------------------------------------------ actions
 local function doAction(a)
     if a == "mute" then setMute(not State.muted)
     elseif a == "legacy" then startLoop("legacy")
     elseif a == "modern" then startLoop("modern")
     elseif a == "stop" then stopLoop() notify("Stopped")
-    elseif a == "hide" then tabButtons.Main.MouseButton1Click()
+    elseif a == "hide" and hideWin then hideWin()
     end
 end
 
@@ -399,8 +400,10 @@ UIS.InputBegan:Connect(function(input, processed)
     if processed or input.KeyCode == Enum.KeyCode.Unknown then return end
     if capturing then
         Binds[capturing] = input.KeyCode
-        bindBtns[capturing].Text = input.KeyCode.Name
-        bindBtns[capturing].TextColor3 = Color3.fromRGB(216, 216, 226)
+        if bindBtns[capturing] then
+            bindBtns[capturing].Text = input.KeyCode.Name
+            bindBtns[capturing].TextColor3 = Color3.fromRGB(216, 216, 226)
+        end
         capturing = nil
         saveCfg()
         return
@@ -418,7 +421,7 @@ UIS.InputBegan:Connect(function(input, processed)
 end)
 
 ------------------------------------------------------------------ hide / close
-headerBtn("–", -62, function()
+function hideWin()
     win.Visible = false
     if reopen then reopen:Destroy() end
     reopen = new("TextButton", {
@@ -432,7 +435,7 @@ headerBtn("–", -62, function()
         reopen:Destroy() reopen = nil
         win.Visible = true
     end)
-end)
+end
 
 local function unload()
     stopLoop()
@@ -443,6 +446,7 @@ local function unload()
 end
 getgenv().AVCB_Unload = unload
 
+headerBtn("–", -62, hideWin)
 headerBtn("X", -32, unload)
 
 ------------------------------------------------------------------ boot
