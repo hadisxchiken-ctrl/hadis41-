@@ -1,9 +1,7 @@
 --=====================================================================
---  ANTI VC BAN  v3.3  |  PC build  |  by hadis
+--  ANTI VC BAN  v3.4  |  PC build  |  by hadis
 --  Hotkeys: V mute · F1 legacy · F2 modern · F3 stop · F4 hide · F5 unload
 --  Join chain: JoinVoice -> JoinVoiceChannel -> VoiceChatInternal
---  Best on: Velocity / Madium / Wave / Potassium
---  Does NOT work on: Zeno, Xeno, Solara, Volt
 --=====================================================================
 
 if getgenv().AVCB_Unload then pcall(getgenv().AVCB_Unload) end
@@ -19,22 +17,18 @@ local LP       = Players.LocalPlayer
 local VCI
 pcall(function() VCI = game:GetService("VoiceChatInternal") end)
 
-local VERSION  = "3.3"
+local VERSION  = "3.4"
 local CFG_PATH = "avcb_config.json"
 
 local State = {
     mode = "legacy", autoStart = false, notifyOn = true, hideUi = true,
-    interval = 0.75, running = false, muted = false, joins = 0, startedAt = nil,
+    interval = 0.75, running = false, muted = false, joins = 0,
+    startedAt = nil, lastErr = "-",
 }
-local lastJoin = "-"
 
 local Binds = {
-    mute = Enum.KeyCode.V,
-    legacy = Enum.KeyCode.F1,
-    modern = Enum.KeyCode.F2,
-    stop = Enum.KeyCode.F3,
-    hide = Enum.KeyCode.F4,
-    unload = Enum.KeyCode.F5,
+    mute = Enum.KeyCode.V, legacy = Enum.KeyCode.F1, modern = Enum.KeyCode.F2,
+    stop = Enum.KeyCode.F3, hide = Enum.KeyCode.F4, unload = Enum.KeyCode.F5,
 }
 
 local thread, capturing, reopen, hideWin
@@ -82,7 +76,7 @@ local function loadCfg()
 end
 loadCfg()
 
------------------------------------------------------------------- stock VC ui hiding
+------------------------------------------------------------------ stock ui
 local hiddenVc = {}
 
 local function hideVcUi()
@@ -90,7 +84,7 @@ local function hideVcUi()
     if not rg then return false end
     local bar = rg:FindFirstChild("TopBar") or rg
     local found = false
-    local ok = pcall(function()
+    pcall(function()
         for _, d in ipairs(bar:GetDescendants()) do
             if d:IsA("GuiObject") and d.Visible then
                 local n = d.Name
@@ -102,7 +96,7 @@ local function hideVcUi()
             end
         end
     end)
-    return ok and found
+    return found
 end
 
 local function showVcUi()
@@ -114,7 +108,7 @@ end
 
 ------------------------------------------------------------------ engine
 local function joinOnce()
-    local ok, err = false, nil
+    local ok, err = false, "no method"
     if typeof(VCS.JoinVoice) == "function" then
         ok, err = pcall(VCS.JoinVoice, VCS)
     end
@@ -125,12 +119,12 @@ local function joinOnce()
         ok, err = pcall(VCI.JoinVoice, VCI)
     end
     if not ok and typeof(VCS.GetVoiceChatId) == "function" then
-        local cid = select(2, pcall(VCS.GetVoiceChatId, VCS))
-        if cid then ok, err = pcall(VCS.JoinVoiceChannel, VCS, cid) end
+        local got, cid = pcall(VCS.GetVoiceChatId, VCS)
+        if got and cid then ok, err = pcall(VCS.JoinVoiceChannel, VCS, cid) end
     end
-    lastJoin = ok and "ok" or tostring(err)
+    State.lastErr = ok and "ok" or tostring(err)
     if ok then State.joins = State.joins + 1 end
-    return ok
+    return ok, err
 end
 
 local function isJoined()
@@ -149,6 +143,7 @@ local function setMute(s)
     end
     if not ok then pcall(function() VCS:SetMicrophoneMute(s) end) end
     if not ok then joinOnce() end
+    if setState then setState() end
 end
 
 local function stopLoop()
@@ -156,31 +151,36 @@ local function stopLoop()
     State.startedAt = nil
     if thread then pcall(task.cancel, thread) thread = nil end
     if State.hideUi then showVcUi() end
+    if setState then setState() end
 end
 
 local function startLoop(m)
-    stopLoop()
-    State.mode, State.running, State.startedAt = m, true, os.clock()
-    if m == "legacy" and State.hideUi then
-        task.spawn(function()
-            for _ = 1, 12 do
-                if not State.running then return end
-                hideVcUi()
-                task.wait(0.5)
+    local ok, err = pcall(function()
+        stopLoop()
+        State.mode, State.running, State.startedAt = m, true, os.clock()
+        if m == "legacy" and State.hideUi then
+            task.spawn(function()
+                for _ = 1, 12 do
+                    if not State.running then return end
+                    hideVcUi()
+                    task.wait(0.5)
+                end
+            end)
+        end
+        thread = task.spawn(function()
+            while State.running do
+                if State.mode == "legacy" then
+                    joinOnce()
+                    task.wait(State.interval)
+                else
+                    if isJoined() ~= true then joinOnce() end
+                    task.wait(math.max(State.interval * 2.5, 1))
+                end
             end
         end)
-    end
-    thread = task.spawn(function()
-        while State.running do
-            if State.mode == "legacy" then
-                joinOnce()
-                task.wait(State.interval)
-            else
-                if isJoined() ~= true then joinOnce() end
-                task.wait(math.max(State.interval * 2.5, 1))
-            end
-        end
     end)
+    if not ok then State.lastErr = "startLoop: " .. tostring(err) end
+    if setState then setState() end
     notify("Active (" .. m .. ")")
 end
 
@@ -190,18 +190,15 @@ pcall(function() gui.Parent = CoreGui end)
 if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
 
 local win = new("Frame", {
-    Size = UDim2.fromOffset(384, 306),
-    Position = UDim2.new(0, 24, 0.5, -153),
+    Size = UDim2.fromOffset(384, 318),
+    Position = UDim2.new(0, 24, 0.5, -159),
     BackgroundColor3 = Color3.fromRGB(16, 16, 20),
     BorderSizePixel = 0, Active = true,
 }, gui)
 new("UICorner", { CornerRadius = UDim.new(0, 10) }, win)
 new("UIStroke", { Color = Color3.fromRGB(44, 44, 54), Thickness = 1 }, win)
 
-local header = new("Frame", {
-    Size = UDim2.new(1, 0, 0, 34),
-    BackgroundColor3 = Color3.fromRGB(26, 26, 32), BorderSizePixel = 0,
-}, win)
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.fromRGB(26, 26, 32), BorderSizePixel = 0 }, win)
 new("UICorner", { CornerRadius = UDim.new(0, 10) }, header)
 
 new("TextLabel", {
@@ -250,7 +247,7 @@ end)
 local tabBar = new("Frame", { Size = UDim2.new(1, -20, 0, 26), Position = UDim2.fromOffset(10, 42), BackgroundTransparency = 1 }, win)
 new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, tabBar)
 
-local content = new("Frame", { Size = UDim2.new(1, -20, 1, -102), Position = UDim2.fromOffset(10, 74), BackgroundTransparency = 1 }, win)
+local content = new("Frame", { Size = UDim2.new(1, -20, 1, -114), Position = UDim2.fromOffset(10, 74), BackgroundTransparency = 1 }, win)
 
 local pages, tabButtons = {}, {}
 
@@ -331,14 +328,22 @@ end
 local mainP = pages.Main
 actionBtn(mainP, "Anti VC Ban  —  Legacy      [F1]", 0, Color3.fromRGB(32, 92, 62), 34, function() startLoop("legacy") end)
 actionBtn(mainP, "Anti VC Ban  —  Modern     [F2]", 40, Color3.fromRGB(34, 60, 96), 34, function() startLoop("modern") end)
-actionBtn(mainP, "Stop      [F3]", 80, Color3.fromRGB(48, 48, 58), 28, function() stopLoop() notify("Stopped") end)
+actionBtn(mainP, "Stop      [F3]", 80, Color3.fromRGB(48, 48, 58), 26, function() stopLoop() notify("Stopped") end)
 
-local stateBox = new("Frame", { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.fromOffset(0, 114), BackgroundColor3 = Color3.fromRGB(22, 22, 28), BorderSizePixel = 0 }, mainP)
+local testBtn = actionBtn(mainP, "Test join (1x)", 111, Color3.fromRGB(40, 40, 48), 24, function()
+    local ok, err = joinOnce()
+    State.lastErr = ok and "ok (manual)" or tostring(err)
+    setState()
+end)
+testBtn.TextSize = 11
+
+local stateBox = new("Frame", { Size = UDim2.new(1, 0, 0, 62), Position = UDim2.fromOffset(0, 140), BackgroundColor3 = Color3.fromRGB(22, 22, 28), BorderSizePixel = 0 }, mainP)
 new("UICorner", { CornerRadius = UDim.new(0, 6) }, stateBox)
-new("TextLabel", { Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(10, 5), BackgroundTransparency = 1, Text = "STATE", TextColor3 = Color3.fromRGB(110, 110, 122), Font = Enum.Font.GothamBold, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
-local stateLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 16), Position = UDim2.fromOffset(10, 18), BackgroundTransparency = 1, Text = "idle · mic live", TextColor3 = Color3.fromRGB(200, 200, 210), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
 
-label(mainP, "Legacy hides the stock VC UI on purpose. Mute is a hotkey, not a button.", 160, Color3.fromRGB(110, 110, 122), 10)
+new("TextLabel", { Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(10, 5), BackgroundTransparency = 1, Text = "STATE", TextColor3 = Color3.fromRGB(110, 110, 122), Font = Enum.Font.GothamBold, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
+local stateLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 17), BackgroundTransparency = 1, Text = "idle · mic live", TextColor3 = Color3.fromRGB(200, 200, 210), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
+local joinsLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 31), BackgroundTransparency = 1, Text = "joins: 0", TextColor3 = Color3.fromRGB(150, 150, 162), Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
+local errLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 45), BackgroundTransparency = 1, Text = "last join: -", TextColor3 = Color3.fromRGB(150, 150, 162), Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, stateBox)
 
 ------------------------------------------------------------------ HOTKEYS
 local hkP = pages.Hotkeys
@@ -380,20 +385,20 @@ local intervalLabel = label(setP, "", 104, Color3.fromRGB(200, 200, 210), 11)
 local function renderInterval() intervalLabel.Text = string.format("Rejoin interval:  %.2fs", State.interval) end
 renderInterval()
 
-local minusBtn = actionBtn(setP, "-", 122, Color3.fromRGB(34, 34, 42), 26, function()
+local minusBtn = actionBtn(setP, "-", 122, Color3.fromRGB(34, 34, 42), 24, function()
     State.interval = math.clamp(State.interval - 0.25, 0.25, 5) renderInterval() saveCfg()
 end)
-minusBtn.Size = UDim2.new(0.48, 0, 0, 26)
+minusBtn.Size = UDim2.new(0.48, 0, 0, 24)
 minusBtn.TextXAlignment = Enum.TextXAlignment.Center
 
-local plusBtn = actionBtn(setP, "+", 122, Color3.fromRGB(34, 34, 42), 26, function()
+local plusBtn = actionBtn(setP, "+", 122, Color3.fromRGB(34, 34, 42), 24, function()
     State.interval = math.clamp(State.interval + 0.25, 0.25, 5) renderInterval() saveCfg()
 end)
-plusBtn.Size = UDim2.new(0.48, 0, 0, 26)
+plusBtn.Size = UDim2.new(0.48, 0, 0, 24)
 plusBtn.Position = UDim2.new(0.52, 0, 0, 122)
 plusBtn.TextXAlignment = Enum.TextXAlignment.Center
 
-actionBtn(setP, "Reset all settings", 156, Color3.fromRGB(60, 40, 40), 26, function()
+actionBtn(setP, "Reset all settings", 152, Color3.fromRGB(60, 40, 40), 24, function()
     State.autoStart, State.notifyOn, State.hideUi, State.interval = false, true, true, 0.75
     for a, k in pairs({ mute = "V", legacy = "F1", modern = "F2", stop = "F3", hide = "F4", unload = "F5" }) do
         Binds[a] = Enum.KeyCode[k]
@@ -405,18 +410,18 @@ end)
 ------------------------------------------------------------------ INFO
 local infoP = pages.Info
 local rows = {
-    { "Status", "idle" }, { "Method", "-" }, { "VC state", "nil" },
-    { "Mic", "live" }, { "Joins sent", "0" }, { "Last join", "-" },
-    { "Uptime", "-" }, { "JoinVoice", typeof(VCS.JoinVoice) },
+    { "JoinVoice", typeof(VCS.JoinVoice) },
     { "JoinVoiceChannel", typeof(VCS.JoinVoiceChannel) },
     { "VoiceChatInternal", VCI and "present" or "missing" },
     { "Executor mute API", (VCI and VCI.SetMicrophoneMute) and "yes" or "fallback" },
+    { "VC state", "nil" },
+    { "Joins sent", "0" },
+    { "Uptime", "-" },
 }
-local infoLbls = {}
 for i, r in ipairs(rows) do
-    local l = label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 15, Color3.fromRGB(190, 190, 200), 10)
-    infoLbls[r[1]] = l
+    label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 16, Color3.fromRGB(190, 190, 200), 10)
 end
+local infoState = label(infoP, "", 118, Color3.fromRGB(120, 220, 160), 10)
 
 ------------------------------------------------------------------ CREDITS
 local credP = pages.Credits
@@ -424,32 +429,38 @@ label(credP, "ANTI VC BAN  v" .. VERSION, 0, Color3.fromRGB(160, 240, 190), 14)
 label(credP, "by hadis", 22, Color3.fromRGB(200, 200, 210), 12)
 label(credP, "PC build. Legacy + Modern rejoin engine.", 48)
 label(credP, "Use an alt if you care about the account.", 68)
-label(credP, "Not affiliated with Roblox or Mois7.", 88)
 
 ------------------------------------------------------------------ footer
 local footer = new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 18), Position = UDim2.new(0, 10, 1, -26),
+    Size = UDim2.new(1, -20, 0, 16), Position = UDim2.new(0, 10, 1, -22),
     BackgroundTransparency = 1, Text = "idle", TextColor3 = Color3.fromRGB(110, 110, 122),
     Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
 }, win)
 
+------------------------------------------------------------------ state render
+function setState()
+    pcall(function()
+        local mic = State.muted and "muted" or "live"
+        stateLbl.Text = (State.running and (State.mode .. " running") or "idle") .. " · mic " .. mic
+        joinsLbl.Text = "joins: " .. State.joins
+        errLbl.Text = "last join: " .. State.lastErr
+        errLbl.TextColor3 = (State.lastErr == "ok" or State.lastErr == "ok (manual)")
+            and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(230, 130, 130)
+        footer.Text = (State.running and ("running · " .. State.mode) or "idle") .. " · mic " .. mic
+        footer.TextColor3 = State.running and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(110, 110, 122)
+    end)
+end
+
 task.spawn(function()
     while gui.Parent do
-        if State.running then
-            footer.Text = "running · " .. State.mode .. " · mic " .. (State.muted and "muted" or "live")
-            footer.TextColor3 = Color3.fromRGB(120, 220, 160)
-        else
-            footer.Text = "idle · mic " .. (State.muted and "muted" or "live")
-            footer.TextColor3 = Color3.fromRGB(110, 110, 122)
-        end
-        stateLbl.Text = (State.running and (State.mode .. " running") or "idle") .. " · mic " .. (State.muted and "muted" or "live")
-        infoLbls["Status"].Text = "Status:  " .. (State.running and "RUNNING" or "idle")
-        infoLbls["Method"].Text = "Method:  " .. (State.running and State.mode or "-")
-        infoLbls["VC state"].Text = "VC state:  " .. tostring(isJoined())
-        infoLbls["Mic"].Text = "Mic:  " .. (State.muted and "muted" or "live")
-        infoLbls["Joins sent"].Text = "Joins sent:  " .. State.joins
-        infoLbls["Last join"].Text = "Last join:  " .. lastJoin
-        infoLbls["Uptime"].Text = "Uptime:  " .. (State.startedAt and string.format("%.0fs", os.clock() - State.startedAt) or "-")
+        pcall(function()
+            if State.running then
+                joinsLbl.Text = "joins: " .. State.joins
+                errLbl.Text = "last join: " .. State.lastErr
+            end
+            infoState.Text = "live: " .. (State.running and (State.mode .. " / " .. State.joins) or "idle")
+            for i, r in ipairs(rows) do end
+        end)
         task.wait(0.4)
     end
 end)
@@ -493,7 +504,7 @@ function hideWin()
     win.Visible = false
     if reopen then reopen:Destroy() end
     reopen = new("TextButton", {
-        Size = UDim2.fromOffset(104, 28), Position = UDim2.fromOffset(24, 300),
+        Size = UDim2.fromOffset(104, 26), Position = UDim2.fromOffset(24, 300),
         BackgroundColor3 = Color3.fromRGB(26, 26, 32), BorderSizePixel = 0,
         Text = "Anti VC Ban v" .. VERSION, TextColor3 = Color3.fromRGB(120, 220, 160),
         Font = Enum.Font.GothamBold, TextSize = 10,
@@ -519,5 +530,6 @@ headerBtn("X", -32, unload)
 
 ------------------------------------------------------------------ boot
 selectTab("Main")
+setState()
 if State.autoStart then task.delay(0.4, function() startLoop(State.mode) end) end
 notify("Loaded v" .. VERSION .. " · F1 legacy")
