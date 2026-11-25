@@ -1,7 +1,7 @@
 --=====================================================================
---  ANTI VC BAN  v3.4  |  PC build  |  by hadis
+--  ANTI VC BAN  v3.5  |  PC build  |  by hadis
+--  Join chain probes 6 candidates + channel-id fallback
 --  Hotkeys: V mute · F1 legacy · F2 modern · F3 stop · F4 hide · F5 unload
---  Join chain: JoinVoice -> JoinVoiceChannel -> VoiceChatInternal
 --=====================================================================
 
 if getgenv().AVCB_Unload then pcall(getgenv().AVCB_Unload) end
@@ -17,7 +17,7 @@ local LP       = Players.LocalPlayer
 local VCI
 pcall(function() VCI = game:GetService("VoiceChatInternal") end)
 
-local VERSION  = "3.4"
+local VERSION  = "3.5"
 local CFG_PATH = "avcb_config.json"
 
 local State = {
@@ -32,6 +32,20 @@ local Binds = {
 }
 
 local thread, capturing, reopen, hideWin
+
+------------------------------------------------------------------ safe access
+local function hasMember(obj, name)
+    if not obj then return false end
+    local ok, v = pcall(function() return obj[name] end)
+    return ok and v ~= nil
+end
+
+local function tryCall(obj, name, ...)
+    if not obj then return false, "no object" end
+    local got, fn = pcall(function() return obj[name] end)
+    if not got or typeof(fn) ~= "function" then return false, name .. " missing" end
+    return pcall(fn, obj, ...)
+end
 
 ------------------------------------------------------------------ utils
 local function new(class, props, parent)
@@ -108,19 +122,22 @@ end
 
 ------------------------------------------------------------------ engine
 local function joinOnce()
-    local ok, err = false, "no method"
-    if typeof(VCS.JoinVoice) == "function" then
-        ok, err = pcall(VCS.JoinVoice, VCS)
+    local ok, err = false, "no candidate"
+    local candidates = {
+        { VCS, "JoinVoice" },
+        { VCS, "JoinVoiceChannel" },
+        { VCS, "JoinVoiceChat" },
+        { VCI, "JoinVoice" },
+        { VCI, "JoinVoiceChannel" },
+        { VCI, "JoinVoiceChat" },
+    }
+    for _, c in ipairs(candidates) do
+        ok, err = tryCall(c[1], c[2])
+        if ok then break end
     end
-    if not ok and typeof(VCS.JoinVoiceChannel) == "function" then
-        ok, err = pcall(VCS.JoinVoiceChannel, VCS)
-    end
-    if not ok and VCI and typeof(VCI.JoinVoice) == "function" then
-        ok, err = pcall(VCI.JoinVoice, VCI)
-    end
-    if not ok and typeof(VCS.GetVoiceChatId) == "function" then
-        local got, cid = pcall(VCS.GetVoiceChatId, VCS)
-        if got and cid then ok, err = pcall(VCS.JoinVoiceChannel, VCS, cid) end
+    if not ok and VCI and hasMember(VCI, "GetVoiceChatId") then
+        local got, cid = pcall(function() return VCI:GetVoiceChatId() end)
+        if got and cid then ok, err = tryCall(VCS, "JoinVoiceChannel", cid) end
     end
     State.lastErr = ok and "ok" or tostring(err)
     if ok then State.joins = State.joins + 1 end
@@ -128,8 +145,8 @@ local function joinOnce()
 end
 
 local function isJoined()
-    if not VCI or typeof(VCI.GetVoiceChatState) ~= "function" then return nil end
-    local ok, st = pcall(VCI.GetVoiceChatState, VCI)
+    if not hasMember(VCI, "GetVoiceChatState") then return nil end
+    local ok, st = pcall(function() return VCI:GetVoiceChatState() end)
     if not ok then return nil end
     local n = tostring(st)
     return n:find("Joined") ~= nil or n:find("InChannel") ~= nil
@@ -138,8 +155,8 @@ end
 local function setMute(s)
     State.muted = s
     local ok = false
-    if VCI and typeof(VCI.SetMicrophoneMute) == "function" then
-        ok = pcall(VCI.SetMicrophoneMute, VCI, s)
+    if hasMember(VCI, "SetMicrophoneMute") then
+        ok = pcall(function() VCI:SetMicrophoneMute(s) end)
     end
     if not ok then pcall(function() VCS:SetMicrophoneMute(s) end) end
     if not ok then joinOnce() end
@@ -409,25 +426,29 @@ end)
 
 ------------------------------------------------------------------ INFO
 local infoP = pages.Info
+local function yesNo(b) return b and "yes" or "no" end
 local rows = {
-    { "JoinVoice", typeof(VCS.JoinVoice) },
-    { "JoinVoiceChannel", typeof(VCS.JoinVoiceChannel) },
-    { "VoiceChatInternal", VCI and "present" or "missing" },
-    { "Executor mute API", (VCI and VCI.SetMicrophoneMute) and "yes" or "fallback" },
-    { "VC state", "nil" },
-    { "Joins sent", "0" },
-    { "Uptime", "-" },
+    { "VCS:JoinVoice", yesNo(hasMember(VCS, "JoinVoice")) },
+    { "VCS:JoinVoiceChannel", yesNo(hasMember(VCS, "JoinVoiceChannel")) },
+    { "VCS:JoinVoiceChat", yesNo(hasMember(VCS, "JoinVoiceChat")) },
+    { "VCI present", yesNo(VCI ~= nil) },
+    { "VCI:JoinVoice", yesNo(hasMember(VCI, "JoinVoice")) },
+    { "VCI:JoinVoiceChannel", yesNo(hasMember(VCI, "JoinVoiceChannel")) },
+    { "VCI:GetVoiceChatId", yesNo(hasMember(VCI, "GetVoiceChatId")) },
+    { "VCI:GetVoiceChatState", yesNo(hasMember(VCI, "GetVoiceChatState")) },
+    { "VCI:SetMicrophoneMute", yesNo(hasMember(VCI, "SetMicrophoneMute")) },
 }
 for i, r in ipairs(rows) do
-    label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 16, Color3.fromRGB(190, 190, 200), 10)
+    local good = r[2] == "yes"
+    label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 15, good and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(210, 130, 130), 10)
 end
-local infoState = label(infoP, "", 118, Color3.fromRGB(120, 220, 160), 10)
+local infoLive = label(infoP, "live: idle", 140, Color3.fromRGB(150, 150, 162), 10)
 
 ------------------------------------------------------------------ CREDITS
 local credP = pages.Credits
 label(credP, "ANTI VC BAN  v" .. VERSION, 0, Color3.fromRGB(160, 240, 190), 14)
 label(credP, "by hadis", 22, Color3.fromRGB(200, 200, 210), 12)
-label(credP, "PC build. Legacy + Modern rejoin engine.", 48)
+label(credP, "PC build. Probing join engine.", 48)
 label(credP, "Use an alt if you care about the account.", 68)
 
 ------------------------------------------------------------------ footer
@@ -454,12 +475,11 @@ end
 task.spawn(function()
     while gui.Parent do
         pcall(function()
+            infoLive.Text = "live: " .. (State.running and (State.mode .. " / joins " .. State.joins) or "idle")
             if State.running then
                 joinsLbl.Text = "joins: " .. State.joins
                 errLbl.Text = "last join: " .. State.lastErr
             end
-            infoState.Text = "live: " .. (State.running and (State.mode .. " / " .. State.joins) or "idle")
-            for i, r in ipairs(rows) do end
         end)
         task.wait(0.4)
     end
