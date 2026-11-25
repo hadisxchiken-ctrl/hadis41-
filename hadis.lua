@@ -1,6 +1,7 @@
 --=====================================================================
---  ANTI VC BAN  |  standalone  |  Legacy + Modern  |  mute keybind
---  Re-execute safe. Best on: Potassium / Velocity / Wave / Madium
+--  ANTI VC BAN  v2  |  Legacy + Modern  |  PC keybind + mobile button
+--  by hadis  |  Re-execute safe
+--  Best on: Potassium / Velocity / Wave / Madium
 --  Does NOT work on: Zeno, Xeno, Solara, Volt
 --=====================================================================
 
@@ -22,7 +23,7 @@ local mode = "legacy"
 local function notify(msg)
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "Anti VC Ban", Text = msg, Duration = 3
+            Title = "Anti VC Ban v2", Text = msg, Duration = 3
         })
     end)
 end
@@ -46,10 +47,7 @@ local function setMute(state)
         ok = pcall(VCI.SetMicrophoneMute, VCI, state)
     end
     if not ok then pcall(function() VCS:SetMicrophoneMute(state) end) end
-    if not ok then
-        -- last resort: bounce the session with the flag flipped
-        joinOnce()
-    end
+    if not ok then joinOnce() end
 end
 
 local function stopLoop()
@@ -59,8 +57,7 @@ end
 
 local function startLoop(m)
     stopLoop()
-    mode  = m
-    running = true
+    mode, running = m, true
     thread = task.spawn(function()
         while running do
             if mode == "legacy" then
@@ -72,7 +69,7 @@ local function startLoop(m)
             end
         end
     end)
-    notify("Anti VC Ban active (" .. mode .. ")")
+    notify("Active (" .. mode .. ")")
 end
 
 ------------------------------------------------------------------ gui
@@ -84,8 +81,8 @@ pcall(function() gui.Parent = game:GetService("CoreGui") end)
 if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
 
 local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(250, 190)
-main.Position = UDim2.new(0, 20, 0.5, -95)
+main.Size = UDim2.fromOffset(250, 222)
+main.Position = UDim2.new(0, 20, 0.5, -111)
 main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 main.BorderSizePixel = 0
 main.Active = true
@@ -97,13 +94,25 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 32)
 title.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
 title.BorderSizePixel = 0
-title.Text = "  ANTI VC BAN"
+title.Text = "  ANTI VC BAN   v2"
 title.TextColor3 = Color3.fromRGB(120, 220, 160)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 13
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = main
 Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
+
+local hideBtn = Instance.new("TextButton")
+hideBtn.Size = UDim2.fromOffset(46, 22)
+hideBtn.Position = UDim2.new(1, -54, 0, 5)
+hideBtn.BackgroundColor3 = Color3.fromRGB(48, 48, 58)
+hideBtn.BorderSizePixel = 0
+hideBtn.Text = "hide"
+hideBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
+hideBtn.Font = Enum.Font.GothamMedium
+hideBtn.TextSize = 11
+hideBtn.Parent = title
+Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 5)
 
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
@@ -128,7 +137,7 @@ local function button(text, y, color, cb)
     b.TextSize = 12
     b.Parent = main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-    b.MouseButton1Click:Connect(cb)
+    if cb then b.MouseButton1Click:Connect(cb) end
     return b
 end
 
@@ -144,14 +153,22 @@ button("Anti VC Ban  (Modern)", 98, Color3.fromRGB(34, 60, 96), function()
     status.TextColor3 = Color3.fromRGB(130, 180, 240)
 end)
 
-local muteBtn = button("Mute key: V", 134, Color3.fromRGB(48, 48, 58), function() end)
+local muteBtn = button("Mute  (key: V)", 134, Color3.fromRGB(48, 48, 58))
 local capturing = false
 muteBtn.MouseButton1Click:Connect(function()
     capturing = true
     muteBtn.Text = "Press a key..."
 end)
 
-local unloadBtn = button("Unload", 170, Color3.fromRGB(80, 34, 34), function() end)
+-- mobile / tap mute
+local tapMute = button("Tap to Mute Mic", 170, Color3.fromRGB(40, 40, 48), function()
+    setMute(not muted)
+    muteBtn.Text = "Mute  (key: " .. muteKey.Name .. ")"
+    status.Text = muted and "Mic muted" or "Mic live"
+    status.TextColor3 = muted and Color3.fromRGB(240, 120, 120) or Color3.fromRGB(120, 220, 160)
+end)
+
+local unloadBtn = button("Unload", 206, Color3.fromRGB(80, 34, 34))
 
 ------------------------------------------------------------------ input
 UIS.InputBegan:Connect(function(input, processed)
@@ -159,7 +176,7 @@ UIS.InputBegan:Connect(function(input, processed)
     if capturing and input.KeyCode ~= Enum.KeyCode.Unknown then
         capturing = false
         muteKey = input.KeyCode
-        muteBtn.Text = "Mute key: " .. input.KeyCode.Name
+        muteBtn.Text = "Mute  (key: " .. muteKey.Name .. ")"
         return
     end
     if input.KeyCode == muteKey then
@@ -169,7 +186,32 @@ UIS.InputBegan:Connect(function(input, processed)
     end
 end)
 
------------------------------------------------------------------- unload
+------------------------------------------------------------------ hide / unload
+local hidden = false
+hideBtn.MouseButton1Click:Connect(function()
+    hidden = not hidden
+    main.Visible = false
+    if hidden then
+        local reopen = Instance.new("TextButton")
+        reopen.Name = "AVCB_Reopen"
+        reopen.Size = UDim2.fromOffset(96, 26)
+        reopen.Position = UDim2.new(0, 20, 0.5, -13)
+        reopen.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+        reopen.BorderSizePixel = 0
+        reopen.Text = "Anti VC Ban"
+        reopen.TextColor3 = Color3.fromRGB(120, 220, 160)
+        reopen.Font = Enum.Font.GothamBold
+        reopen.TextSize = 11
+        reopen.Parent = gui
+        Instance.new("UICorner", reopen).CornerRadius = UDim.new(0, 6)
+        reopen.MouseButton1Click:Connect(function()
+            reopen:Destroy()
+            hidden = false
+            main.Visible = true
+        end)
+    end
+end)
+
 local function unload()
     stopLoop()
     pcall(function() if muted then setMute(false) end end)
@@ -181,4 +223,4 @@ getgenv().AVCB_Unload = unload
 unloadBtn.MouseButton1Click:Connect(unload)
 
 status.Text = "Pick Legacy or Modern."
-notify("Loaded — choose a method")
+notify("Loaded v2 — choose a method")
