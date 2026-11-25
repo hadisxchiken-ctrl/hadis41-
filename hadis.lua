@@ -1,37 +1,31 @@
 --=====================================================================
---  ANTI VC BAN  v3.5  |  PC build  |  by hadis
---  Join chain probes 6 candidates + channel-id fallback
+--  ANTI VC BAN  v3.6  |  PC build  |  by hadis
+--  Auto-starts legacy. Probes the voice API on load and prints results.
 --  Hotkeys: V mute · F1 legacy · F2 modern · F3 stop · F4 hide · F5 unload
 --=====================================================================
 
 if getgenv().AVCB_Unload then pcall(getgenv().AVCB_Unload) end
 getgenv().AVCB_Loaded = true
 
-local Players  = game:GetService("Players")
-local VCS      = game:GetService("VoiceChatService")
-local UIS      = game:GetService("UserInputService")
-local HS       = game:GetService("HttpService")
-local SG       = game:GetService("StarterGui")
-local CoreGui  = game:GetService("CoreGui")
-local LP       = Players.LocalPlayer
+local VERSION = "3.6"
+local Players, VCS, UIS, CoreGui, SG
+local LP
 local VCI
+
+pcall(function()
+    Players = game:GetService("Players")
+    VCS     = game:GetService("VoiceChatService")
+    UIS     = game:GetService("UserInputService")
+    CoreGui = game:GetService("CoreGui")
+    SG      = game:GetService("StarterGui")
+    LP      = Players.LocalPlayer
+end)
 pcall(function() VCI = game:GetService("VoiceChatInternal") end)
 
-local VERSION  = "3.5"
-local CFG_PATH = "avcb_config.json"
-
-local State = {
-    mode = "legacy", autoStart = false, notifyOn = true, hideUi = true,
-    interval = 0.75, running = false, muted = false, joins = 0,
-    startedAt = nil, lastErr = "-",
-}
-
-local Binds = {
-    mute = Enum.KeyCode.V, legacy = Enum.KeyCode.F1, modern = Enum.KeyCode.F2,
-    stop = Enum.KeyCode.F3, hide = Enum.KeyCode.F4, unload = Enum.KeyCode.F5,
-}
-
-local thread, capturing, reopen, hideWin
+local State = { running = false, muted = false, joins = 0, lastErr = "-", mode = "legacy" }
+local Binds = { mute = Enum.KeyCode.V, legacy = Enum.KeyCode.F1, modern = Enum.KeyCode.F2,
+                stop = Enum.KeyCode.F3, hide = Enum.KeyCode.F4, unload = Enum.KeyCode.F5 }
+local thread, capturing, reopen
 
 ------------------------------------------------------------------ safe access
 local function hasMember(obj, name)
@@ -47,101 +41,23 @@ local function tryCall(obj, name, ...)
     return pcall(fn, obj, ...)
 end
 
------------------------------------------------------------------- utils
-local function new(class, props, parent)
-    local o = Instance.new(class)
-    for k, v in pairs(props or {}) do o[k] = v end
-    if parent then o.Parent = parent end
-    return o
-end
-
-local function notify(text)
-    if not State.notifyOn then return end
-    pcall(function()
-        SG:SetCore("SendNotification", { Title = "Anti VC Ban v" .. VERSION, Text = text, Duration = 3 })
-    end)
-end
-
-local function saveCfg()
-    if not writefile then return end
-    local keys = {}
-    for a, k in pairs(Binds) do keys[a] = k.Name end
-    pcall(function()
-        writefile(CFG_PATH, HS:JSONEncode({
-            binds = keys, autoStart = State.autoStart, hideUi = State.hideUi,
-            notifyOn = State.notifyOn, interval = State.interval,
-        }))
-    end)
-end
-
-local function loadCfg()
-    if not (isfile and readfile) or not isfile(CFG_PATH) then return end
-    local ok, data = pcall(function() return HS:JSONDecode(readfile(CFG_PATH)) end)
-    if not ok or type(data) ~= "table" then return end
-    if type(data.binds) == "table" then
-        for a, name in pairs(data.binds) do
-            if Binds[a] and Enum.KeyCode[name] then Binds[a] = Enum.KeyCode[name] end
-        end
-    end
-    if type(data.autoStart) == "boolean" then State.autoStart = data.autoStart end
-    if type(data.hideUi) == "boolean" then State.hideUi = data.hideUi end
-    if type(data.notifyOn) == "boolean" then State.notifyOn = data.notifyOn end
-    if tonumber(data.interval) then State.interval = math.clamp(tonumber(data.interval), 0.25, 5) end
-end
-loadCfg()
-
------------------------------------------------------------------- stock ui
-local hiddenVc = {}
-
-local function hideVcUi()
-    local rg = CoreGui:FindFirstChild("RobloxGui")
-    if not rg then return false end
-    local bar = rg:FindFirstChild("TopBar") or rg
-    local found = false
-    pcall(function()
-        for _, d in ipairs(bar:GetDescendants()) do
-            if d:IsA("GuiObject") and d.Visible then
-                local n = d.Name
-                if n:find("Voice") or n:find("Mic") or n:find("Vc") or n:find("VCS") then
-                    hiddenVc[d] = true
-                    d.Visible = false
-                    found = true
-                end
-            end
-        end
-    end)
-    return found
-end
-
-local function showVcUi()
-    for obj in pairs(hiddenVc) do
-        pcall(function() if obj.Parent then obj.Visible = true end end)
-    end
-    hiddenVc = {}
-end
-
 ------------------------------------------------------------------ engine
 local function joinOnce()
     local ok, err = false, "no candidate"
-    local candidates = {
-        { VCS, "JoinVoice" },
-        { VCS, "JoinVoiceChannel" },
-        { VCS, "JoinVoiceChat" },
-        { VCI, "JoinVoice" },
-        { VCI, "JoinVoiceChannel" },
-        { VCI, "JoinVoiceChat" },
-    }
-    for _, c in ipairs(candidates) do
+    for _, c in ipairs({
+        { VCS, "JoinVoice" }, { VCS, "JoinVoiceChannel" }, { VCS, "JoinVoiceChat" },
+        { VCI, "JoinVoice" }, { VCI, "JoinVoiceChannel" }, { VCI, "JoinVoiceChat" },
+    }) do
         ok, err = tryCall(c[1], c[2])
         if ok then break end
     end
-    if not ok and VCI and hasMember(VCI, "GetVoiceChatId") then
+    if not ok and hasMember(VCI, "GetVoiceChatId") then
         local got, cid = pcall(function() return VCI:GetVoiceChatId() end)
         if got and cid then ok, err = tryCall(VCS, "JoinVoiceChannel", cid) end
     end
     State.lastErr = ok and "ok" or tostring(err)
     if ok then State.joins = State.joins + 1 end
-    return ok, err
+    return ok
 end
 
 local function isJoined()
@@ -155,95 +71,89 @@ end
 local function setMute(s)
     State.muted = s
     local ok = false
-    if hasMember(VCI, "SetMicrophoneMute") then
-        ok = pcall(function() VCI:SetMicrophoneMute(s) end)
-    end
+    if hasMember(VCI, "SetMicrophoneMute") then ok = pcall(function() VCI:SetMicrophoneMute(s) end) end
     if not ok then pcall(function() VCS:SetMicrophoneMute(s) end) end
     if not ok then joinOnce() end
-    if setState then setState() end
+    if render then render() end
 end
 
 local function stopLoop()
     State.running = false
-    State.startedAt = nil
     if thread then pcall(task.cancel, thread) thread = nil end
-    if State.hideUi then showVcUi() end
-    if setState then setState() end
+    if render then render() end
 end
 
 local function startLoop(m)
-    local ok, err = pcall(function()
-        stopLoop()
-        State.mode, State.running, State.startedAt = m, true, os.clock()
-        if m == "legacy" and State.hideUi then
-            task.spawn(function()
-                for _ = 1, 12 do
-                    if not State.running then return end
-                    hideVcUi()
-                    task.wait(0.5)
-                end
-            end)
-        end
-        thread = task.spawn(function()
-            while State.running do
-                if State.mode == "legacy" then
-                    joinOnce()
-                    task.wait(State.interval)
-                else
-                    if isJoined() ~= true then joinOnce() end
-                    task.wait(math.max(State.interval * 2.5, 1))
-                end
+    pcall(stopLoop)
+    State.mode, State.running = m, true
+    thread = task.spawn(function()
+        while State.running do
+            if State.mode == "legacy" then
+                joinOnce()
+                task.wait(0.75)
+            else
+                if isJoined() ~= true then joinOnce() end
+                task.wait(2)
             end
-        end)
+        end
     end)
-    if not ok then State.lastErr = "startLoop: " .. tostring(err) end
-    if setState then setState() end
-    notify("Active (" .. m .. ")")
+    if render then render() end
+    print("[AVCB] loop started:", m)
 end
 
 ------------------------------------------------------------------ window
-local gui = new("ScreenGui", { Name = "AVCB", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
+local gui = Instance.new("ScreenGui")
+gui.Name = "AVCB"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 pcall(function() gui.Parent = CoreGui end)
-if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
+if not gui.Parent and LP then gui.Parent = LP:WaitForChild("PlayerGui") end
 
-local win = new("Frame", {
-    Size = UDim2.fromOffset(384, 318),
-    Position = UDim2.new(0, 24, 0.5, -159),
-    BackgroundColor3 = Color3.fromRGB(16, 16, 20),
-    BorderSizePixel = 0, Active = true,
-}, gui)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, win)
-new("UIStroke", { Color = Color3.fromRGB(44, 44, 54), Thickness = 1 }, win)
+local win = Instance.new("Frame")
+win.Size = UDim2.fromOffset(340, 404)
+win.Position = UDim2.new(0, 24, 0, 90)
+win.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+win.BorderSizePixel = 0
+win.Active = true
+win.Parent = gui
+local winCorner = Instance.new("UICorner") winCorner.CornerRadius = UDim.new(0, 10) winCorner.Parent = win
+local stroke = Instance.new("UIStroke") stroke.Color = Color3.fromRGB(44, 44, 54) stroke.Parent = win
 
-local header = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.fromRGB(26, 26, 32), BorderSizePixel = 0 }, win)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, header)
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 34)
+header.BackgroundColor3 = Color3.fromRGB(26, 26, 32)
+header.BorderSizePixel = 0
+header.Parent = win
+local hc = Instance.new("UICorner") hc.CornerRadius = UDim.new(0, 10) hc.Parent = header
 
-new("TextLabel", {
-    Size = UDim2.new(1, -120, 1, 0), Position = UDim2.fromOffset(12, 0),
-    BackgroundTransparency = 1, Text = "ANTI VC BAN",
-    TextColor3 = Color3.fromRGB(120, 220, 160), Font = Enum.Font.GothamBold,
-    TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-}, header)
-
-new("TextLabel", {
-    Size = UDim2.fromOffset(40, 34), Position = UDim2.new(1, -114, 0, 0),
-    BackgroundTransparency = 1, Text = "v" .. VERSION,
-    TextColor3 = Color3.fromRGB(110, 110, 124), Font = Enum.Font.Gotham, TextSize = 10,
-}, header)
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -110, 1, 0)
+title.Position = UDim2.fromOffset(12, 0)
+title.BackgroundTransparency = 1
+title.Text = "ANTI VC BAN  v" .. VERSION
+title.TextColor3 = Color3.fromRGB(120, 220, 160)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 12
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
 
 local function headerBtn(text, x, cb)
-    local b = new("TextButton", {
-        Size = UDim2.fromOffset(26, 22), Position = UDim2.new(1, x, 0, 6),
-        BackgroundColor3 = Color3.fromRGB(44, 44, 54), BorderSizePixel = 0,
-        Text = text, TextColor3 = Color3.fromRGB(210, 210, 220),
-        Font = Enum.Font.GothamBold, TextSize = 12,
-    }, header)
-    new("UICorner", { CornerRadius = UDim.new(0, 5) }, b)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.fromOffset(26, 22)
+    b.Position = UDim2.new(1, x, 0, 6)
+    b.BackgroundColor3 = Color3.fromRGB(44, 44, 54)
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(210, 210, 220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.Parent = header
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = b
     b.MouseButton1Click:Connect(cb)
     return b
 end
 
------------------------------------------------------------------- dragging
+-- dragging
 local dragging, dragStart, startPos
 header.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -260,237 +170,136 @@ UIS.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 end)
 
------------------------------------------------------------------- tabs
-local tabBar = new("Frame", { Size = UDim2.new(1, -20, 0, 26), Position = UDim2.fromOffset(10, 42), BackgroundTransparency = 1 }, win)
-new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, tabBar)
+------------------------------------------------------------------ log
+local logFrame = Instance.new("Frame")
+logFrame.Size = UDim2.new(1, -20, 0, 200)
+logFrame.Position = UDim2.fromOffset(10, 42)
+logFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+logFrame.BorderSizePixel = 0
+logFrame.Parent = win
+local lc = Instance.new("UICorner") lc.CornerRadius = UDim.new(0, 6) lc.Parent = logFrame
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 8) pad.PaddingTop = UDim.new(0, 6) pad.Parent = logFrame
 
-local content = new("Frame", { Size = UDim2.new(1, -20, 1, -114), Position = UDim2.fromOffset(10, 74), BackgroundTransparency = 1 }, win)
+local list = Instance.new("Frame")
+list.Size = UDim2.new(1, 0, 1, 0)
+list.BackgroundTransparency = 1
+list.Parent = logFrame
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 1)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = list
 
-local pages, tabButtons = {}, {}
-
-local function makePage(name, order)
-    local p = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false, LayoutOrder = order }, content)
-    pages[name] = p
-    local b = new("TextButton", {
-        Size = UDim2.fromOffset(64, 26), BackgroundColor3 = Color3.fromRGB(26, 26, 32),
-        BorderSizePixel = 0, Text = name, TextColor3 = Color3.fromRGB(140, 140, 152),
-        Font = Enum.Font.GothamMedium, TextSize = 11, LayoutOrder = order,
-    }, tabBar)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, b)
-    tabButtons[name] = b
-end
-
-local function selectTab(name)
-    for n, p in pairs(pages) do p.Visible = (n == name) end
-    for n, b in pairs(tabButtons) do
-        local on = (n == name)
-        b.BackgroundColor3 = on and Color3.fromRGB(38, 74, 56) or Color3.fromRGB(26, 26, 32)
-        b.TextColor3 = on and Color3.fromRGB(160, 240, 190) or Color3.fromRGB(140, 140, 152)
+local logCount = 0
+local function log(text, color, alsoPrint)
+    logCount = logCount + 1
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, 0, 0, 13)
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextColor3 = color or Color3.fromRGB(160, 160, 172)
+    l.Font = Enum.Font.Code
+    l.TextSize = 10
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.LayoutOrder = logCount
+    l.Parent = list
+    if alsoPrint ~= false then pcall(print, "[AVCB] " .. text) end
+    if logCount > 15 and list:FindFirstChildWhichIsA("TextLabel") then
+        local first = list:FindFirstChildWhichIsA("TextLabel")
+        if first and first.LayoutOrder == logCount - 15 then first:Destroy() end
     end
 end
 
-for i, n in ipairs({ "Main", "Hotkeys", "Settings", "Info", "Credits" }) do
-    makePage(n, i)
-    tabButtons[n].MouseButton1Click:Connect(function() selectTab(n) end)
+local function probe()
+    log("---- probe ----", Color3.fromRGB(120, 220, 160))
+    local function check(obj, name)
+        local ok, v = pcall(function() return obj and obj[name] end)
+        local exists = ok and v ~= nil
+        log(name .. " -> " .. (exists and typeof(v) or "MISSING"),
+            exists and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(230, 130, 130))
+    end
+    check(VCS, "VCS.JoinVoice")
+    check(VCS, "VCS.JoinVoiceChannel")
+    check(VCS, "VCS.JoinVoiceChat")
+    check(VCS, "VCS.SetMicrophoneMute")
+    log("VCI present -> " .. tostring(VCI ~= nil), VCI and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(230, 130, 130))
+    if VCI then
+        check(VCI, "VCI.JoinVoice")
+        check(VCI, "VCI.JoinVoiceChannel")
+        check(VCI, "VCI.GetVoiceChatState")
+    end
+    log("state -> " .. tostring(select(2, pcall(function() return VCI:GetVoiceChatState() end))))
+    log("---- end probe ----", Color3.fromRGB(120, 220, 160))
 end
 
------------------------------------------------------------------- helpers
-local function label(parent, text, y, color, size)
-    return new("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, y),
-        BackgroundTransparency = 1, Text = text,
-        TextColor3 = color or Color3.fromRGB(130, 130, 142),
-        Font = Enum.Font.Gotham, TextSize = size or 11,
-        TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-    }, parent)
-end
-
-local function actionBtn(parent, text, y, color, height, cb)
-    local b = new("TextButton", {
-        Size = UDim2.new(1, 0, 0, height or 32), Position = UDim2.fromOffset(0, y),
-        BackgroundColor3 = color, BorderSizePixel = 0, Text = text,
-        TextColor3 = Color3.fromRGB(235, 235, 240), Font = Enum.Font.GothamMedium,
-        TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
-    }, parent)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, b)
-    new("UIPadding", { PaddingLeft = UDim.new(0, 12) }, b)
-    if cb then b.MouseButton1Click:Connect(cb) end
+------------------------------------------------------------------ buttons
+local function actBtn(text, y, color, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 28)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = color
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(235, 235, 240)
+    b.Font = Enum.Font.GothamMedium
+    b.TextSize = 11
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    b.Parent = win
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = b
+    local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 10) p.Parent = b
+    b.MouseButton1Click:Connect(function()
+        log("click: " .. text)
+        local ok, err = pcall(cb)
+        if not ok then log("ERR: " .. tostring(err), Color3.fromRGB(230, 130, 130)) end
+    end)
     return b
 end
 
-local function toggleRow(parent, text, y, get, set)
-    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 30), Position = UDim2.fromOffset(0, y), BackgroundColor3 = Color3.fromRGB(22, 22, 28), BorderSizePixel = 0 }, parent)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, row)
-    new("TextLabel", {
-        Size = UDim2.new(1, -60, 1, 0), Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1, Text = text, TextColor3 = Color3.fromRGB(200, 200, 210),
-        Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-    }, row)
-    local pill = new("TextButton", { Size = UDim2.fromOffset(42, 20), Position = UDim2.new(1, -52, 0, 5), BackgroundColor3 = Color3.fromRGB(44, 44, 54), BorderSizePixel = 0, Text = "" }, row)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, pill)
-    local knob = new("Frame", { Size = UDim2.fromOffset(16, 16), Position = UDim2.fromOffset(2, 2), BackgroundColor3 = Color3.fromRGB(150, 150, 162), BorderSizePixel = 0 }, pill)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
-    local function render()
-        local on = get()
-        pill.BackgroundColor3 = on and Color3.fromRGB(38, 96, 64) or Color3.fromRGB(44, 44, 54)
-        knob.Position = on and UDim2.new(1, -18, 0, 2) or UDim2.fromOffset(2, 2)
-        knob.BackgroundColor3 = on and Color3.fromRGB(150, 240, 190) or Color3.fromRGB(150, 150, 162)
-    end
-    pill.MouseButton1Click:Connect(function() set(not get()) render() end)
-    render()
-    return row
-end
-
------------------------------------------------------------------- MAIN
-local mainP = pages.Main
-actionBtn(mainP, "Anti VC Ban  —  Legacy      [F1]", 0, Color3.fromRGB(32, 92, 62), 34, function() startLoop("legacy") end)
-actionBtn(mainP, "Anti VC Ban  —  Modern     [F2]", 40, Color3.fromRGB(34, 60, 96), 34, function() startLoop("modern") end)
-actionBtn(mainP, "Stop      [F3]", 80, Color3.fromRGB(48, 48, 58), 26, function() stopLoop() notify("Stopped") end)
-
-local testBtn = actionBtn(mainP, "Test join (1x)", 111, Color3.fromRGB(40, 40, 48), 24, function()
-    local ok, err = joinOnce()
-    State.lastErr = ok and "ok (manual)" or tostring(err)
-    setState()
+actBtn("Legacy  (F1)", 250, Color3.fromRGB(32, 92, 62), function() startLoop("legacy") end)
+actBtn("Modern  (F2)", 282, Color3.fromRGB(34, 60, 96), function() startLoop("modern") end)
+actBtn("Stop  (F3)", 314, Color3.fromRGB(48, 48, 58), function() stopLoop() end)
+actBtn("Test join  (1x)", 346, Color3.fromRGB(40, 40, 48), function()
+    local ok = joinOnce()
+    log("test -> " .. State.lastErr, ok and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(230, 130, 130))
 end)
-testBtn.TextSize = 11
-
-local stateBox = new("Frame", { Size = UDim2.new(1, 0, 0, 62), Position = UDim2.fromOffset(0, 140), BackgroundColor3 = Color3.fromRGB(22, 22, 28), BorderSizePixel = 0 }, mainP)
-new("UICorner", { CornerRadius = UDim.new(0, 6) }, stateBox)
-
-new("TextLabel", { Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(10, 5), BackgroundTransparency = 1, Text = "STATE", TextColor3 = Color3.fromRGB(110, 110, 122), Font = Enum.Font.GothamBold, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
-local stateLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 17), BackgroundTransparency = 1, Text = "idle · mic live", TextColor3 = Color3.fromRGB(200, 200, 210), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
-local joinsLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 31), BackgroundTransparency = 1, Text = "joins: 0", TextColor3 = Color3.fromRGB(150, 150, 162), Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left }, stateBox)
-local errLbl = new("TextLabel", { Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 45), BackgroundTransparency = 1, Text = "last join: -", TextColor3 = Color3.fromRGB(150, 150, 162), Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, stateBox)
-
------------------------------------------------------------------- HOTKEYS
-local hkP = pages.Hotkeys
-local bindBtns = {}
-
-local function bindRow(action, text, y)
-    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, y), BackgroundColor3 = Color3.fromRGB(22, 22, 28), BorderSizePixel = 0 }, hkP)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, row)
-    new("TextLabel", { Size = UDim2.new(1, -60, 1, 0), Position = UDim2.fromOffset(10, 0), BackgroundTransparency = 1, Text = text, TextColor3 = Color3.fromRGB(200, 200, 210), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, row)
-    local k = new("TextButton", { Size = UDim2.fromOffset(40, 18), Position = UDim2.new(1, -48, 0, 4), BackgroundColor3 = Color3.fromRGB(44, 44, 54), BorderSizePixel = 0, Text = Binds[action].Name, TextColor3 = Color3.fromRGB(216, 216, 226), Font = Enum.Font.GothamBold, TextSize = 9 }, row)
-    new("UICorner", { CornerRadius = UDim.new(0, 4) }, k)
-    bindBtns[action] = k
-    k.MouseButton1Click:Connect(function()
-        capturing = action
-        for _, b in pairs(bindBtns) do b.TextColor3 = Color3.fromRGB(216, 216, 226) end
-        k.Text = "..."
-        k.TextColor3 = Color3.fromRGB(160, 240, 190)
-    end)
-end
-
-bindRow("mute", "Mute mic", 0)
-bindRow("legacy", "Start legacy", 30)
-bindRow("modern", "Start modern", 60)
-bindRow("stop", "Stop", 90)
-bindRow("hide", "Hide UI", 120)
-bindRow("unload", "Unload", 150)
-
------------------------------------------------------------------- SETTINGS
-local setP = pages.Settings
-toggleRow(setP, "Auto-start on execute", 0, function() return State.autoStart end, function(v) State.autoStart = v saveCfg() end)
-toggleRow(setP, "Notifications", 34, function() return State.notifyOn end, function(v) State.notifyOn = v saveCfg() end)
-toggleRow(setP, "Hide stock VC UI (legacy)", 68, function() return State.hideUi end, function(v)
-    State.hideUi = v
-    if v and State.running then hideVcUi() elseif not v then showVcUi() end
-    saveCfg()
+actBtn("Unload  (F5)", 378, Color3.fromRGB(60, 34, 34), function()
+    if getgenv().AVCB_Unload then getgenv().AVCB_Unload() end
 end)
-
-local intervalLabel = label(setP, "", 104, Color3.fromRGB(200, 200, 210), 11)
-local function renderInterval() intervalLabel.Text = string.format("Rejoin interval:  %.2fs", State.interval) end
-renderInterval()
-
-local minusBtn = actionBtn(setP, "-", 122, Color3.fromRGB(34, 34, 42), 24, function()
-    State.interval = math.clamp(State.interval - 0.25, 0.25, 5) renderInterval() saveCfg()
-end)
-minusBtn.Size = UDim2.new(0.48, 0, 0, 24)
-minusBtn.TextXAlignment = Enum.TextXAlignment.Center
-
-local plusBtn = actionBtn(setP, "+", 122, Color3.fromRGB(34, 34, 42), 24, function()
-    State.interval = math.clamp(State.interval + 0.25, 0.25, 5) renderInterval() saveCfg()
-end)
-plusBtn.Size = UDim2.new(0.48, 0, 0, 24)
-plusBtn.Position = UDim2.new(0.52, 0, 0, 122)
-plusBtn.TextXAlignment = Enum.TextXAlignment.Center
-
-actionBtn(setP, "Reset all settings", 152, Color3.fromRGB(60, 40, 40), 24, function()
-    State.autoStart, State.notifyOn, State.hideUi, State.interval = false, true, true, 0.75
-    for a, k in pairs({ mute = "V", legacy = "F1", modern = "F2", stop = "F3", hide = "F4", unload = "F5" }) do
-        Binds[a] = Enum.KeyCode[k]
-        if bindBtns[a] then bindBtns[a].Text = k end
-    end
-    renderInterval() saveCfg()
-end)
-
------------------------------------------------------------------- INFO
-local infoP = pages.Info
-local function yesNo(b) return b and "yes" or "no" end
-local rows = {
-    { "VCS:JoinVoice", yesNo(hasMember(VCS, "JoinVoice")) },
-    { "VCS:JoinVoiceChannel", yesNo(hasMember(VCS, "JoinVoiceChannel")) },
-    { "VCS:JoinVoiceChat", yesNo(hasMember(VCS, "JoinVoiceChat")) },
-    { "VCI present", yesNo(VCI ~= nil) },
-    { "VCI:JoinVoice", yesNo(hasMember(VCI, "JoinVoice")) },
-    { "VCI:JoinVoiceChannel", yesNo(hasMember(VCI, "JoinVoiceChannel")) },
-    { "VCI:GetVoiceChatId", yesNo(hasMember(VCI, "GetVoiceChatId")) },
-    { "VCI:GetVoiceChatState", yesNo(hasMember(VCI, "GetVoiceChatState")) },
-    { "VCI:SetMicrophoneMute", yesNo(hasMember(VCI, "SetMicrophoneMute")) },
-}
-for i, r in ipairs(rows) do
-    local good = r[2] == "yes"
-    label(infoP, r[1] .. ":  " .. r[2], (i - 1) * 15, good and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(210, 130, 130), 10)
-end
-local infoLive = label(infoP, "live: idle", 140, Color3.fromRGB(150, 150, 162), 10)
-
------------------------------------------------------------------- CREDITS
-local credP = pages.Credits
-label(credP, "ANTI VC BAN  v" .. VERSION, 0, Color3.fromRGB(160, 240, 190), 14)
-label(credP, "by hadis", 22, Color3.fromRGB(200, 200, 210), 12)
-label(credP, "PC build. Probing join engine.", 48)
-label(credP, "Use an alt if you care about the account.", 68)
 
 ------------------------------------------------------------------ footer
-local footer = new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 16), Position = UDim2.new(0, 10, 1, -22),
-    BackgroundTransparency = 1, Text = "idle", TextColor3 = Color3.fromRGB(110, 110, 122),
-    Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
-}, win)
+local footer = Instance.new("TextLabel")
+footer.Size = UDim2.new(1, -20, 0, 16)
+footer.Position = UDim2.new(0, 10, 1, -20)
+footer.BackgroundTransparency = 1
+footer.Text = "idle"
+footer.TextColor3 = Color3.fromRGB(110, 110, 122)
+footer.Font = Enum.Font.Gotham
+footer.TextSize = 10
+footer.TextXAlignment = Enum.TextXAlignment.Left
+footer.Parent = win
 
------------------------------------------------------------------- state render
-function setState()
+function render()
     pcall(function()
-        local mic = State.muted and "muted" or "live"
-        stateLbl.Text = (State.running and (State.mode .. " running") or "idle") .. " · mic " .. mic
-        joinsLbl.Text = "joins: " .. State.joins
-        errLbl.Text = "last join: " .. State.lastErr
-        errLbl.TextColor3 = (State.lastErr == "ok" or State.lastErr == "ok (manual)")
-            and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(230, 130, 130)
-        footer.Text = (State.running and ("running · " .. State.mode) or "idle") .. " · mic " .. mic
+        footer.Text = string.format("%s · mic %s · joins %d · last %s",
+            State.running and (State.mode .. " running") or "idle",
+            State.muted and "muted" or "live", State.joins, State.lastErr)
         footer.TextColor3 = State.running and Color3.fromRGB(120, 220, 160) or Color3.fromRGB(110, 110, 122)
     end)
 end
 
 task.spawn(function()
     while gui.Parent do
-        pcall(function()
-            infoLive.Text = "live: " .. (State.running and (State.mode .. " / joins " .. State.joins) or "idle")
-            if State.running then
-                joinsLbl.Text = "joins: " .. State.joins
-                errLbl.Text = "last join: " .. State.lastErr
-            end
-        end)
-        task.wait(0.4)
+        render()
+        task.wait(0.5)
     end
 end)
 
------------------------------------------------------------------- actions
+------------------------------------------------------------------ input
 local function doAction(a)
     if a == "mute" then setMute(not State.muted)
     elseif a == "legacy" then startLoop("legacy")
     elseif a == "modern" then startLoop("modern")
-    elseif a == "stop" then stopLoop() notify("Stopped")
+    elseif a == "stop" then stopLoop()
     elseif a == "hide" and hideWin then hideWin()
     end
 end
@@ -499,12 +308,8 @@ UIS.InputBegan:Connect(function(input, processed)
     if processed or input.KeyCode == Enum.KeyCode.Unknown then return end
     if capturing then
         Binds[capturing] = input.KeyCode
-        if bindBtns[capturing] then
-            bindBtns[capturing].Text = input.KeyCode.Name
-            bindBtns[capturing].TextColor3 = Color3.fromRGB(216, 216, 226)
-        end
         capturing = nil
-        saveCfg()
+        log("bind -> " .. input.KeyCode.Name)
         return
     end
     for a, key in pairs(Binds) do
@@ -523,33 +328,42 @@ end)
 function hideWin()
     win.Visible = false
     if reopen then reopen:Destroy() end
-    reopen = new("TextButton", {
-        Size = UDim2.fromOffset(104, 26), Position = UDim2.fromOffset(24, 300),
-        BackgroundColor3 = Color3.fromRGB(26, 26, 32), BorderSizePixel = 0,
-        Text = "Anti VC Ban v" .. VERSION, TextColor3 = Color3.fromRGB(120, 220, 160),
-        Font = Enum.Font.GothamBold, TextSize = 10,
-    }, gui)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, reopen)
+    reopen = Instance.new("TextButton")
+    reopen.Size = UDim2.fromOffset(104, 26)
+    reopen.Position = UDim2.fromOffset(24, 90)
+    reopen.BackgroundColor3 = Color3.fromRGB(26, 26, 32)
+    reopen.BorderSizePixel = 0
+    reopen.Text = "Anti VC Ban v" .. VERSION
+    reopen.TextColor3 = Color3.fromRGB(120, 220, 160)
+    reopen.Font = Enum.Font.GothamBold
+    reopen.TextSize = 10
+    reopen.Parent = gui
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = reopen
     reopen.MouseButton1Click:Connect(function()
         reopen:Destroy() reopen = nil
         win.Visible = true
     end)
 end
 
-local function unload()
-    stopLoop()
+function getgenv().AVCB_Unload()
+    pcall(stopLoop)
     pcall(function() if State.muted then setMute(false) end end)
     gui:Destroy()
     getgenv().AVCB_Loaded = nil
     getgenv().AVCB_Unload = nil
+    pcall(print, "[AVCB] unloaded")
 end
-getgenv().AVCB_Unload = unload
 
 headerBtn("–", -62, hideWin)
-headerBtn("X", -32, unload)
+headerBtn("X", -32, function() getgenv().AVCB_Unload() end)
 
 ------------------------------------------------------------------ boot
-selectTab("Main")
-setState()
-if State.autoStart then task.delay(0.4, function() startLoop(State.mode) end) end
-notify("Loaded v" .. VERSION .. " · F1 legacy")
+print("[AVCB] v" .. VERSION .. " loaded")
+probe()
+render()
+task.delay(1, function()
+    if gui.Parent then
+        log("auto-starting legacy...")
+        startLoop("legacy")
+    end
+end)
